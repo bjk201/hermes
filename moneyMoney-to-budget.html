@@ -359,13 +359,14 @@ let gfSymbolRules = [];     // [{pattern, symbol}]
 //   3: Zahlungsbetreff
 //   4: IBAN
 //   5: BIC
-//   6: Betrag (€)
-//   7: Währung
-//   8: Kategorie
-//   9: Unterkategorie
-//  10: Notizen
-//  11: Empfänger
-//  12: Auftraggeber
+//   6: Absender IBAN
+//   7: Betrag (€)          ← ACHTUNG: Nicht Spalte 6!
+//   8: Währung
+//   9: Kategorie
+//  10: Unterkategorie
+//  11: Notizen
+//  12: Empfänger
+//  13: Auftraggeber
 // (columns may vary slightly by version)
 
 function parseMoneyMoneyCSV(text) {
@@ -394,12 +395,12 @@ function parseMoneyMoneyCSV(text) {
     // Normalize: try to find key fields by common MM column names
     const account = cols[0] || '';
     const dateRaw = cols[1] || cols[2] || '';
-    const payee = cols[3] || cols[11] || cols[12] || '';
-    const amountStr = cols[6] || '';
-    const currency = cols[7] || 'EUR';
-    const category = cols[8] || '';
-    const subcategory = cols[9] || '';
-    const notes = cols[10] || '';
+    const payee = cols[3] || cols[12] || cols[13] || '';
+    const amountStr = cols[7] || '';           // Betrag ist Spalte 7, nicht 6!
+    const currency = cols[8] || 'EUR';
+    const category = cols[9] || '';
+    const subcategory = cols[10] || '';
+    const notes = cols[11] || '';
 
     // Parse amount: handle German number format (1.234,56 → 1234.56)
     let amount = 0;
