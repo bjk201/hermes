@@ -297,6 +297,7 @@
     <div class="tabs">
       <div class="tab active" data-tab="gf-mapping">Symbol-Zuordnung</div>
       <div class="tab" data-tab="gf-options">Optionen</div>
+      <div class="tab" data-tab="gf-account">Konto</div>
     </div>
     <div class="tab-content active" id="gf-mapping">
       <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.8rem;">
@@ -335,6 +336,37 @@
         </select>
       </div>
     </div>
+    <div class="tab-content" id="gf-account">
+      <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.8rem;">
+        Wähle das Ghostfolio-Konto aus, in das importiert wird. Dieses Konto muss in Ghostfolio bereits existieren.
+        Der Kontoname wird in die Export-CSV geschrieben, damit Ghostfolio die Transaktionen dem richtigen Konto zuordnet.
+      </p>
+      <div class="mapping-row">
+        <label>Ghostfolio-Konto</label>
+        <div style="display:flex;gap:0.5rem;align-items:center;width:100%;">
+          <input type="text" id="gfAccount" placeholder="z.B. Depot, Verrechnungskonto, Crypto" list="gfAccountList" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:0.5rem;border-radius:8px;font-size:0.85rem;flex:1;">
+          <datalist id="gfAccountList">
+            <option value="Verrechnungskonto">
+            <option value="Depot">
+            <option value="Crypto">
+            <option value="Sparkonto">
+            <option value="Girokonto">
+          </datalist>
+        </div>
+      </div>
+      <div class="mapping-row">
+        <label>Konto automatisch aus MoneyMoney-Konto übernehmen</label>
+        <select id="gfAccountMode" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:0.5rem;border-radius:8px;font-size:0.85rem;width:100%;">
+          <option value="fixed">Festes Konto (oben ausgewählt)</option>
+          <option value="auto">Pro Zeile das MoneyMoney-Konto verwenden</option>
+          <option value="mapping">Konto-Zuordnung (unten konfigurieren)</option>
+        </select>
+      </div>
+      <div id="gfAccountMappingSection" style="margin-top:0.8rem;">
+        <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.5rem;">MoneyMoney-Konto → Ghostfolio-Konto Zuordnung:</p>
+        <div id="gfAccountMapping"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -348,6 +380,8 @@ let categories = new Set(); // unique categories
 let selectedAccount = null;
 let catMap = {};            // mmCategory -> budgetCategory
 let gfSymbolRules = [];     // [{pattern, symbol}]
+let gfAccountMap = {};      // mmAccount -> ghostfolioAccount
+let gfAccountMode = 'fixed'; // 'fixed' | 'auto' | 'mapping'
 
 // ============================================================
 // MONEYMONEY CSV PARSER
@@ -488,6 +522,7 @@ function handleFile(file) {
     renderAccountSelection();
     renderCategoryMapping();
     renderGfSymbolMapping();
+    renderGfAccountMapping();
     document.getElementById('accountSection').classList.remove('hidden');
     document.getElementById('catSection').classList.remove('hidden');
     document.getElementById('gfSection').classList.remove('hidden');
@@ -617,6 +652,54 @@ document.getElementById('addGfRow').addEventListener('click', () => {
 });
 
 // ============================================================
+// GHOSTFOLIO ACCOUNT MAPPING
+// ============================================================
+function renderGfAccountMapping() {
+  const container = document.getElementById('gfAccountMapping');
+  if (!container) return;
+  container.innerHTML = '';
+
+  accounts.forEach(acc => {
+    const row = document.createElement('div');
+    row.className = 'cat-map-row';
+    row.innerHTML = `
+      <input type="text" value="${escapeHtml(acc)}" readonly title="MoneyMoney Konto">
+      <input type="text" placeholder="Ghostfolio-Konto (leer = nicht importieren)" value="${escapeHtml(gfAccountMap[acc] || '')}" data-acc="${escapeHtml(acc)}" class="gf-acc-map">
+      <button class="btn-sm" data-acc="${escapeHtml(acc)}" title="Zurücksetzen">✕</button>
+    `;
+    container.appendChild(row);
+  });
+
+  container.querySelectorAll('.gf-acc-map').forEach(input => {
+    input.addEventListener('input', e => {
+      gfAccountMap[e.target.dataset.acc] = e.target.value;
+    });
+  });
+  container.querySelectorAll('button[data-acc]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      delete gfAccountMap[e.target.dataset.acc];
+      renderGfAccountMapping();
+    });
+  });
+}
+
+// Account mode toggle: show/hide mapping section
+const gfAccountModeEl = document.getElementById('gfAccountMode');
+if (gfAccountModeEl) {
+  gfAccountModeEl.addEventListener('change', e => {
+    const mappingSection = document.getElementById('gfAccountMappingSection');
+    if (mappingSection) {
+      mappingSection.style.display = e.target.value === 'mapping' ? 'block' : 'none';
+    }
+  });
+  // Initial state
+  const mappingSection = document.getElementById('gfAccountMappingSection');
+  if (mappingSection) {
+    mappingSection.style.display = gfAccountModeEl.value === 'mapping' ? 'block' : 'none';
+  }
+}
+
+// ============================================================
 // TABS
 // ============================================================
 document.querySelectorAll('.tab').forEach(tab => {
@@ -687,9 +770,21 @@ document.getElementById('btnActual').addEventListener('click', () => {
 // ============================================================
 // GHOSTFOLIO EXPORT
 // ============================================================
-// Ghostfolio CSV import format:
-// Date,Type,Symbol,Quantity,Unit Price,Currency,Fee,Note
-// Types: buy, sell, dividend, interest, fee, withdrawal, deposit
+// Ghostfolio CSV import format (based on ImportActivitiesService.ts):
+// Ghostfolio recognizes these headers (case-insensitive, matched via lowercaseKeys):
+//   Date:       date, tradedate
+//   Type:       action, buy/sell, type  → buy, sell, dividend, fee, interest, liability
+//   Symbol:     code, symbol, ticker
+//   Quantity:   qty, quantity, shares, units  → must be finite number
+//   Unit Price: price, tradeprice, unitprice, value  → must be finite number
+//   Currency:   ccy, currency, currencyprimary  → REQUIRED
+//   Fee:        commission, fee, ibcommission  → must be finite number
+//   Account:    account, accountid  → optional, matched against user accounts
+//   Comment:    comment, note  → optional
+//
+// IMPORTANT: Headers must be single words (no spaces) so Ghostfolio's
+// lowercaseKeys() maps them correctly. "Unit Price" → "unit price" ≠ "unitprice"!
+// We use the canonical keys that Ghostfolio recognizes.
 
 document.getElementById('btnGhostfolio').addEventListener('click', () => {
   const data = getFilteredData();
@@ -697,8 +792,11 @@ document.getElementById('btnGhostfolio').addEventListener('click', () => {
   const currency = document.getElementById('gfCurrency').value.trim() || 'EUR';
   const incomeType = document.getElementById('gfIncomeType').value;
   const expenseType = document.getElementById('gfExpenseType').value;
+  const gfAccountVal = document.getElementById('gfAccount')?.value?.trim() || '';
+  const gfAccountMode = document.getElementById('gfAccountMode')?.value || 'fixed';
 
-  const rows = ['Date,Type,Symbol,Quantity,Unit Price,Currency,Fee,Note'];
+  // Ghostfolio-recognized headers (single words, no spaces)
+  const rows = ['date,type,symbol,quantity,unitprice,currency,fee,account,comment'];
 
   data.forEach(r => {
     const date = r.date || '';
@@ -721,18 +819,29 @@ document.getElementById('btnGhostfolio').addEventListener('click', () => {
     if (r.amount > 0) {
       type = incomeType;
       qty = 1;
-      unitPrice = absAmount.toFixed(2);
-      fee = '0';
+      unitPrice = absAmount;  // number, not string — Ghostfolio needs isFinite()
+      fee = 0;
     } else {
       type = expenseType;
       qty = 1;
-      unitPrice = absAmount.toFixed(2);
-      fee = '0';
+      unitPrice = absAmount;  // number, not string
+      fee = 0;
     }
 
-    const note = csvEscape(`${r.payee}${r.notes ? ' — ' + r.notes : ''}${r.category ? ' [' + r.category + ']' : ''}`);
+    // Determine account for this row
+    let account = '';
+    if (gfAccountMode === 'fixed') {
+      account = gfAccountVal;
+    } else if (gfAccountMode === 'auto') {
+      account = r.account || '';
+    } else if (gfAccountMode === 'mapping') {
+      account = gfAccountMap[r.account] || gfAccountVal;
+    }
 
-    rows.push(`${date},${type},${symbol},${qty},${unitPrice},${currency},${fee},${note}`);
+    const comment = csvEscape(`${r.payee}${r.notes ? ' — ' + r.notes : ''}${r.category ? ' [' + r.category + ']' : ''}`);
+
+    // Output numbers as bare numbers (not quoted strings) so PapaParse dynamicTyping detects them
+    rows.push(`${date},${type},${symbol},${qty},${unitPrice},${currency},${fee},${csvEscape(account)},${comment}`);
   });
 
   downloadCSV(rows.join('\n'), 'ghostfolio-import.csv');
