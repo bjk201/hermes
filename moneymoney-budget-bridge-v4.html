@@ -310,11 +310,12 @@ function detectDuplicates(){
   const map=new Map();
   const gV=(r,k)=>{const m=getMap();return m[k]?(r[m[k]]??''):'';};
   S.rawRows.forEach((r,i)=>{
-    const d=gV(r,'date')||gV(r,'valueDate')||'';
-    const a=parseNum(gV(r,'amount'));
-    const p=gV(r,'payee')||'';
-    const ib=(gV(r,'IBAN')||gV(r,'Empfänger IBAN')||'').replace(/\s/g,'');
-    const key=d+'|'+(a??'')+'|'+(ib||p);
+    const date=gV(r,'date')||gV(r,'valueDate')||'';
+    const amt=parseNum(gV(r,'amount'));
+    const payee=gV(r,'payee')||'';
+    const iban=(gV(r,'IBAN')||gV(r,'Empfänger IBAN')||'').replace(/\s/g,'');
+    // ALL of: date + amount + payee + iban must match (date is critical!)
+    const key=date+'|'+(amt??'')+'|'+payee+'|'+iban;
     if(!map.has(key))map.set(key,[]);map.get(key).push(i);
   });
   S.dupGroups=[...map.values()].filter(g=>g.length>1).map(g=>({indices:g}));
@@ -366,7 +367,14 @@ const DEMO=[
   '04.05.2026;04.05.2026;Essen;Lieferando//München/DE;Pizza bestellt;DE12345678901234567890;SSKMDEMMXXX;-22,50;EUR',
   '03.05.2026;03.05.2026;Gehalt;Musterfirma GmbH;Gehalt Mai 2026;DE12345678901234567890;SSKMDEMMXXX;3200,00;EUR',
   '02.05.2026;02.05.2026;Miete;Mustermann Vermieter;Miete Mai 2026;DE12345678901234567890;SSKMDEMMXXX;-850,00;EUR',
-  '01.05.2026;01.05.2026;Versicherung;HUK24 AG / HUK-Coburg Unternehmensgruppe;KFZ-Versicherung Beitrag Hj. 2026;DE12345678901234567890;SSKMDEMMXXX;-234,56;EUR',
+  '01.05.2026;01.05.2026;Versicherung;HUK24 AG / HUK-Coburg;KFZ-Versicherung;DE12345678901234567890;SSKMDEMMXXX;-234,56;EUR',
+  // Duplikat-Gruppe 1: REWE 2x gleich
+  '25.05.2026;25.05.2026;Lebensmittel;REWE Markt Schmidt//Langenzenn/DE;Einkauf;DE00000000000000000000;SSKMDEMMXXX;-54,90;EUR',
+  '25.05.2026;25.05.2026;Lebensmittel;REWE Markt Schmidt//Langenzenn/DE;Einkauf;DE00000000000000000000;SSKMDEMMXXX;-54,90;EUR',
+  // Duplikat-Gruppe 2: Gehalt 3x gleich
+  '15.05.2026;15.05.2026;Einkommen;Musterfirma GmbH;Gehalt Mai 2026;DE00000000000000000000;SSKMDEMMXYZ;2800,00;EUR',
+  '15.05.2026;15.05.2026;Einkommen;Musterfirma GmbH;Gehalt Mai 2026;DE00000000000000000000;SSKMDEMMXYZ;2800,00;EUR',
+  '15.05.2026;15.05.2026;Einkommen;Musterfirma GmbH;Gehalt Mai 2026;DE00000000000000000000;SSKMDEMMXYZ;2800,00;EUR',
 ].join('\n');
 
 const $=id=>document.getElementById(id);

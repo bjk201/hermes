@@ -157,6 +157,41 @@
     .imported-tag{font-size:.65rem;background:color-mix(in srgb,var(--success) 18%,transparent);
       color:var(--success);padding:.1rem .4rem;border-radius:var(--r-full);font-weight:600}
 
+    /* ── DUPLICATE DETECTION ── */
+    .dup-warning{padding:var(--sp3) var(--sp4);border-radius:var(--r-lg);
+      background:color-mix(in srgb,var(--warn) 14%,transparent);
+      border:1px solid color-mix(in srgb,var(--warn) 28%,transparent);
+      margin-bottom:var(--sp4)}
+    .dup-warning strong{color:var(--warn)}
+    .dup-warning p{font-size:var(--text-sm);color:var(--muted);margin-top:var(--sp1)}
+    .dup-warning .dup-count{font-weight:700;color:var(--warn)}
+    .dup-table{max-height:200px;overflow:auto;border-radius:var(--r-lg);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);margin-top:var(--sp3)}
+    .dup-table td{background:color-mix(in srgb,var(--error) 6%,transparent)}
+    .dup-badge{display:inline-flex;align-items:center;padding:.15rem .45rem;border-radius:var(--r-full);
+      background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn);
+      font-size:.65rem;font-weight:700;letter-spacing:.03em}
+    .dup-row-highlight{background:color-mix(in srgb,var(--warn) 10%,transparent)!important}
+
+    /* ── CATEGORY MAPPING ── */
+    .cat-map-wrap{overflow:auto;border-radius:var(--r-lg);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);max-height:320px}
+    .cat-map-wrap th:nth-child(1),.cat-map-wrap td:nth-child(1){max-width:200px;overflow:hidden;text-overflow:ellipsis}
+    .cat-map-wrap th:nth-child(2),.cat-map-wrap td:nth-child(2){max-width:180px}
+    .cat-map-wrap th:nth-child(3),.cat-map-wrap td:nth-child(3){width:40px;text-align:center}
+    .cat-map-suggestion{display:inline-flex;align-items:center;gap:.3rem;
+      background:color-mix(in srgb,var(--primary) 14%,transparent);
+      border:1px solid color-mix(in srgb,var(--primary) 28%,transparent);
+      border-radius:var(--r-full);padding:.15rem .55rem;
+      font-size:var(--text-xs);color:var(--primary);cursor:pointer;transition:.16s ease;
+      margin-top:.2rem}
+    .cat-map-suggestion:hover{background:color-mix(in srgb,var(--primary) 24%,transparent)}
+    .cat-bulk-bar{display:flex;gap:var(--sp2);align-items:center;margin-bottom:var(--sp3);flex-wrap:wrap}
+
+    /* ── ACCOUNT MAPPING ── */
+    .acc-map-wrap{overflow:auto;border-radius:var(--r-lg);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);max-height:260px}
+
     @media(max-width:900px){.grid3,.grid4{grid-template-columns:1fr 1fr}}
     @media(max-width:600px){.grid2,.grid3,.grid4{grid-template-columns:1fr}.topbar{flex-direction:column;align-items:flex-start}}
     @media(prefers-reduced-motion:reduce){*{transition:none!important}}
