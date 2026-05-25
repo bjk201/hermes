@@ -342,15 +342,31 @@ const MF=[
 // ── DEMO ──
 const DEMO=[
   'Datum;Wertstellung;Kategorie;Name;Verwendungszweck;Konto;Bank;Betrag;Währung',
-  '25.05.2026;25.05.2026;Lebensmittel;REWE Markt Schmidt//Langenzenn/DE;Einkauf;DE12345678901234567890;SSKMDEMMXXX;-54,90;EUR',
+  '25.05.2026;25.05.2026;Lebensmittel;REWE Markt Schmidt//Langenzenn/DE;Einkauf Wochenendeinkauf;DE12345678901234567890;SSKMDEMMXXX;-54,90;EUR',
   '24.05.2026;24.05.2026;Einkommen;Musterfirma GmbH;Gehalt Mai 2026;DE12345678901234567890;SSKMDEMMXXX;3200,00;EUR',
-  '23.05.2026;23.05.2026;Nebenkosten;Stadtwerke München;Stromabschlag Mai;DE12345678901234567890;SSKMDEMMXXX;-89,00;EUR',
-  '22.05.2026;22.05.2026;Zinsen;DKB AG;Habenzinsen April;DE98765432101234567890;BELADEBEXXX;7,12;EUR',
-  '21.05.2026;21.05.2026;Versicherung;HUK24 AG;KFZ-Versicherung;DE12345678901234567890;SSKMDEMMXXX;-234,56;EUR',
-  '20.05.2026;20.05.2026;Online;PayPal *Amazon*12345678;Bestellung Bücher;DE12345678901234567890;SSKMDEMMXXX;-29,99;EUR',
-  '19.05.2026;19.05.2026;Mobilität;Shell Tankstelle München;Tanken;DE12345678901234567890;SSKMDEMMXXX;-68,40;EUR',
-  '18.05.2026;18.05.2026;Essen;Uber Eats//Berlin/DE;Essen bestellen;DE12345678901234567890;SSKMDEMMXXX;-18,75;EUR',
-  '25.05.2026;25.05.2026;Lebensmittel;REWE Markt Schmidt//Langenzenn/DE;Einkauf;DE12345678901234567890;SSKMDEMMXXX;-54,90;EUR',
+  '23.05.2026;23.05.2026;Nebenkosten;Stadtwerke München;Stromabschlag Mai 2026;DE12345678901234567890;SSKMDEMMXXX;-89,00;EUR',
+  '22.05.2026;22.05.2026;Zinsen;DKB AG;Habenzinsen April 2026;DE98765432101234567890;BELADEBEXXX;7,12;EUR',
+  '21.05.2026;21.05.2026;Versicherung;HUK24 AG / HUK-Coburg Unternehmensgruppe;KFZ-Versicherung Beitrag Hj. 2026;DE12345678901234567890;SSKMDEMMXXX;-234,56;EUR',
+  '20.05.2026;20.05.2026;Online;PayPal *Amazon*AB-12345678;Bestellung Bücher;DE12345678901234567890;SSKMDEMMXXX;-29,99;EUR',
+  '19.05.2026;19.05.2026;Mobilität;Shell Tankstelle München;Tanken Super Plus;DE12345678901234567890;SSKMDEMMXXX;-68,40;EUR',
+  '18.05.2026;18.05.2026;Essen;Uber Eats//Berlin/DE;Essen bestellen Lieferando;DE12345678901234567890;SSKMDEMMXXX;-18,75;EUR',
+  '17.05.2026;17.05.2026;Lebensmittel;EDEKA Center Müller//Nürnberg/DE;Wocheneinkauf;DE12345678901234567890;SSKMDEMMXXX;-87,23;EUR',
+  '16.05.2026;16.05.2026;Freizeit;Spotify AB;Spotify Premium Abo;DE12345678901234567890;SSKMDEMMXXX;-9,99;EUR',
+  '15.05.2026;15.05.2026;Miete;Mustermann Vermieter;Miete Mai 2026;DE12345678901234567890;SSKMDEMMXXX;-850,00;EUR',
+  '14.05.2026;14.05.2026;Versicherung;Allianz Versicherung;Beitrag Lebensversicherung;DE12345678901234567890;SSKMDEMMXXX;-120,00;EUR',
+  '13.05.2026;13.05.2026;Telekom;Telekom Deutschland GmbH;Mobilfunk Rechnung Mai;DE12345678901234567890;SSKMDEMMXXX;-35,99;EUR',
+  '12.05.2026;12.05.2026;Online;PayPal *Netflix*98765432;Netflix Abo;DE12345678901234567890;SSKMDEMMXXX;-17,99;EUR',
+  '11.05.2026;11.05.2026;Lebensmittel;Lidl Vertriebs GmbH//Fürth/DE;Einkauf;DE12345678901234567890;SSKMDEMMXXX;-42,15;EUR',
+  '10.05.2026;10.05.2026;Gehalt;Musterfirma GmbH;Gehalt Mai 2026;DE12345678901234567890;SSKMDEMMXXX;3200,00;EUR',
+  '09.05.2026;09.05.2026;Mobilität;Deutsche Bahn AG;Fahrkarte München-Berlin;DE12345678901234567890;SSKMDEMMXXX;-59,90;EUR',
+  '08.05.2026;08.05.2026;Gesundheit;DM Drogerie Markt//Erlangen/DE;Apotheke;DE12345678901234567890;SSKMDEMMXXX;-23,47;EUR',
+  '07.05.2026;07.05.2026;Abo;Apple iTunes Store;Apple Music Abo;DE12345678901234567890;SSKMDEMMXXX;-10,99;EUR',
+  '06.05.2026;06.05.2026;Lebensmittel;ALDI Nord//Schweinfurt/DE;Wocheneinkauf;DE12345678901234567890;SSKMDEMMXXX;-61,30;EUR',
+  '05.05.2026;05.05.2026;Kleidung;Zalando SE//Berlin/DE;Bestellung Kleidung;DE12345678901234567890;SSKMDEMMXXX;-79,95;EUR',
+  '04.05.2026;04.05.2026;Essen;Lieferando//München/DE;Pizza bestellt;DE12345678901234567890;SSKMDEMMXXX;-22,50;EUR',
+  '03.05.2026;03.05.2026;Gehalt;Musterfirma GmbH;Gehalt Mai 2026;DE12345678901234567890;SSKMDEMMXXX;3200,00;EUR',
+  '02.05.2026;02.05.2026;Miete;Mustermann Vermieter;Miete Mai 2026;DE12345678901234567890;SSKMDEMMXXX;-850,00;EUR',
+  '01.05.2026;01.05.2026;Versicherung;HUK24 AG / HUK-Coburg Unternehmensgruppe;KFZ-Versicherung Beitrag Hj. 2026;DE12345678901234567890;SSKMDEMMXXX;-234,56;EUR',
 ].join('\n');
 
 const $=id=>document.getElementById(id);
@@ -406,16 +422,19 @@ function setMap(key,val){const s=document.querySelector(`[data-map="${key}"]`);i
 function applyPreset(){
   const h=S.headers;
   const find=(...pats)=>h.find(hh=>pats.some(p=>hh===p))||h.find(hh=>pats.some(p=>hh.toLowerCase().includes(p.toLowerCase())));
-  setMap('date',find('Datum','Buchungstag','Buchungsdatum'));
-  setMap('valueDate',find('Wertstellung','Valuta'));
+  setMap('date',find('Datum','Buchungstag','Buchungsdatum','Valuta','Date'));
+  setMap('valueDate',find('Wertstellung','ValueDate'));
   setMap('amount',find('Betrag','Amount','Umsatz'));
-  setMap('currency',find('Währung','Waehrung','Currency'));
-  setMap('payee',find('Name','Empfänger','Auftraggeber','Payee'));
-  setMap('purpose',find('Verwendungszweck','Purpose','Beschreibung','Memo','Buchungstext'));
+  setMap('currency',find('Währung','Currency','Waehrung'));
+  setMap('payee',find('Name','Empfänger','Auftraggeber','Payee','PayeeName'));
+  setMap('purpose',find('Verwendungszweck','Purpose','Beschreibung','Memo','Buchungstext','Text'));
   setMap('category',find('Kategorie','Category'));
-  setMap('note',find('Konto','Kommentar','Note','Notiz'));
-  setMap('bank',find('Bank','BIC','Institut'));
-  setMap('id',find('Umsatz-ID','ID','Referenz'));
+  setMap('note',find('Konto','Kommentar','Note','Notiz','Notes'));
+  setMap('bank',find('Bank','BIC','Institut','Institute'));
+  setMap('symbol',find('Symbol','Ticker','ISIN'));
+  setMap('isin',find('ISIN','Symbol'));
+  setMap('fee',find('Gebühr','Gebuehr','Fee','Commission'));
+  setMap('id',find('Umsatz-ID','Transaktion-ID','Reference','Referenz','ID'));
   renderAll();
 }
 function pickVal(row,key,fb=''){const m=getMap();return m[key]?(row[m[key]]??fb):fb;}
@@ -434,7 +453,7 @@ function normalizeRows(){
     const symbol=pickVal(row,'symbol');const isin=pickVal(row,'isin');
     const quantity=parseNum(pickVal(row,'quantity'));const unitPrice=parseNum(pickVal(row,'unitPrice'));const fee=parseNum(pickVal(row,'fee'));
     const id=pickVal(row,'id')||`${slugify(el.accountLabel.value||'konto')}-${date||'nd'}-${rawIdx+1}`;
-    const mmAccount=pickVal(row,'Konto')||pickVal(row,'account')||'';
+    const mmAccount=pickVal(row,'Konto')||pickVal(row,'account')||pickVal(row,'Kontobezeichnung')||'';
     let gfType;
     if(currentMode==='cash'){const ex=pickVal(row,'type');gfType=ex?ex.toUpperCase():(amt!=null&&amt<0)?el.cashTypeNeg.value:el.cashTypePos.value;}
     else{const t=el.secType.value;gfType=t==='auto'?(amt!=null&&amt<0)?'SELL':'BUY':t;}
@@ -529,7 +548,7 @@ function renderCatMapping(){
 // ── ACCOUNT UI ──
 function renderAccMapping(){
   const tbody=document.getElementById('accMapBody');
-  const as=new Map();S.rawRows.forEach(r=>{const a=pickVal(r,'Konto')||pickVal(r,'account')||'';if(a)as.set(a,(as.get(a)||0)+1);});
+  const as=new Map();S.rawRows.forEach(r=>{const a=pickVal(r,'Konto')||pickVal(r,'account')||pickVal(r,'Kontobezeichnung')||'';if(a)as.set(a,(as.get(a)||0)+1);});
   S.uniqueAccs=[...as.entries()];
   document.getElementById('accStats').textContent=`${S.uniqueAccs.length} Konten · ${Object.keys(S.accMap).length} zugeordnet`;
   if(!S.uniqueAccs.length){tbody.innerHTML='<tr><td colspan="4" style="color:var(--muted)">Keine.</td></tr>';return;}
@@ -600,7 +619,7 @@ el.file.addEventListener('change',e=>{if(e.target.files.length)handleFile(e.targ
 function handleFile(file){const r=new FileReader();r.onload=e=>{loadText(e.target.result,`${file.name} · ${file.size.toLocaleString('de')} Byte`);};r.readAsText(file,'UTF-8');}
 
 // ── BUTTONS ──
-$('btnDemo').addEventListener('click',()=>{if(!el.accountLabel.value)el.accountLabel.value='DKB Girokonto';if(!el.actualAccount.value)el.actualAccount.value='Girokonto';loadText(DEMO,'Demodaten (9 Zeilen + Duplikat)');});
+$('btnDemo').addEventListener('click',()=>{if(!el.accountLabel.value)el.accountLabel.value='DKB Girokonto';if(!el.actualAccount.value)el.actualAccount.value='Girokonto';loadText(DEMO,'Demodaten (25 Zeilen + Duplikate mit echten MM-Spalten)');});
 $('btnPreset').addEventListener('click',applyPreset);
 el.autoClean.addEventListener('change',()=>{S.autoClean=el.autoClean.checked;renderPayeeMapping();renderAll();});
 el.payeeSearch.addEventListener('input',()=>renderPayeeMapping());
