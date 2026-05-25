@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MoneyMoney Budget Bridge v3</title>
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
+  <style>
+    :root,[data-theme="light"]{
+      --text-xs:clamp(.75rem,.7rem + .25vw,.875rem);--text-sm:clamp(.875rem,.8rem + .35vw,1rem);
+      --text-base:clamp(1rem,.95rem + .25vw,1.125rem);--text-lg:clamp(1.125rem,1rem + .75vw,1.5rem);
+      --text-xl:clamp(1.5rem,1.2rem + 1.25vw,2.25rem);
+      --sp1:.25rem;--sp2:.5rem;--sp3:.75rem;--sp4:1rem;--sp5:1.25rem;--sp6:1.5rem;--sp8:2rem;--sp10:2.5rem;--sp12:3rem;--sp16:4rem;
+      --r-sm:.375rem;--r-md:.5rem;--r-lg:.75rem;--r-xl:1rem;--r-full:9999px;
+      --bg:#f7f6f2;--surface:#f9f8f5;--surface2:#fbfbf9;--surface-off:#f3f0ec;--surface-dyn:#e6e4df;
+      --border:#d4d1ca;--divider:#dcd9d5;--text:#28251d;--muted:#6d6a63;--faint:#9e9c96;
+      --primary:#01696f;--primary-h:#0c4e54;--primary-hl:#d9e6e3;
+      --success:#437a22;--error:#a12c7b;--warn:#964219;--warn-hl:#eeddd2;
+      --sh-sm:0 1px 2px rgba(22,21,18,.07);--sh-md:0 12px 32px rgba(22,21,18,.10);
+    }
+    [data-theme="dark"]{
+      --bg:#171614;--surface:#1c1b19;--surface2:#201f1d;--surface-off:#252320;--surface-dyn:#2d2c2a;
+      --border:#393836;--divider:#2a2927;--text:#e2e1de;--muted:#aea9a2;--faint:#7f7b74;
+      --primary:#4f98a3;--primary-h:#69abb4;--primary-hl:#243537;
+      --success:#7ebb56;--error:#d163a3;--warn:#d39162;--warn-hl:#3d2e20;
+      --sh-sm:0 1px 2px rgba(0,0,0,.25);--sh-md:0 12px 32px rgba(0,0,0,.35);
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{min-height:100vh;font-family:'Satoshi',Inter,sans-serif;font-size:var(--text-base);line-height:1.55;
+      background:radial-gradient(circle at top right,color-mix(in srgb,var(--primary) 8%,transparent),transparent 28%),var(--bg);
+      color:var(--text)}
+    button,input,select,textarea{font:inherit;color:inherit}
+    button{cursor:pointer;background:none;border:none}
+    .shell{width:min(1300px,calc(100% - 2rem));margin:0 auto;padding:var(--sp6) 0 var(--sp16)}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:var(--sp4);
+      margin-bottom:var(--sp8);padding:var(--sp4) var(--sp5);
+      background:color-mix(in srgb,var(--surface) 82%,transparent);
+      border:1px solid color-mix(in srgb,var(--text) 12%,transparent);
+      backdrop-filter:blur(12px);border-radius:var(--r-xl);box-shadow:var(--sh-sm);
+      position:sticky;top:var(--sp4);z-index:20}
+    .brand{display:flex;gap:var(--sp3);align-items:center}
+    .logo{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;flex:0 0 auto;
+      background:linear-gradient(135deg,var(--primary-hl),color-mix(in srgb,var(--surface) 40%,transparent));
+      color:var(--primary);border:1px solid color-mix(in srgb,var(--primary) 26%,transparent)}
+    .brand h1{font-size:var(--text-lg);line-height:1.1}
+    .brand p{color:var(--muted);font-size:var(--text-xs);margin-top:.15rem}
+    .badge{display:inline-flex;align-items:center;padding:.2rem .55rem;border-radius:var(--r-full);
+      background:color-mix(in srgb,var(--primary) 18%,transparent);color:var(--primary);
+      font-size:.7rem;font-weight:700;letter-spacing:.04em;margin-left:.5rem}
+    .toolbar{display:flex;gap:var(--sp2);flex-wrap:wrap}
+    .btn,.btn-sec,.btn-ghost{min-height:42px;border-radius:var(--r-full);padding:0 var(--sp4);
+      display:inline-flex;align-items:center;gap:.45rem;transition:.16s ease;border:1px solid transparent;
+      font-size:var(--text-sm)}
+    .btn{background:var(--primary);color:#fff}.btn:hover{background:var(--primary-h)}
+    .btn-sec{background:color-mix(in srgb,var(--surface-off) 88%,transparent);
+      border-color:color-mix(in srgb,var(--text) 12%,transparent)}
+    .btn-sec:hover,.btn-ghost:hover{background:var(--surface-dyn)}
+    .btn-ghost{color:var(--muted);border-color:color-mix(in srgb,var(--text) 10%,transparent)}
+    .btn-sm{min-height:34px;padding:0 var(--sp3);font-size:var(--text-xs)}
+    .btn-danger{background:var(--error);color:#fff;border-radius:var(--r-full);padding:0 var(--sp3);min-height:34px;
+      font-size:var(--text-xs);display:inline-flex;align-items:center;gap:.3rem}
+    .btn-danger:hover{opacity:.85}
+    main{display:grid;gap:var(--sp6)}
+    .panel{background:color-mix(in srgb,var(--surface) 86%,transparent);
+      border:1px solid color-mix(in srgb,var(--text) 11%,transparent);
+      border-radius:var(--r-xl);box-shadow:var(--sh-sm);padding:var(--sp5)}
+    .panel-title{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp4);margin-bottom:var(--sp5)}
+    .panel-title h2{font-size:var(--text-lg);line-height:1.2}
+    .panel-title p{margin-top:.3rem;color:var(--muted);font-size:var(--text-sm)}
+    .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp4)}
+    .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp4)}
+    .grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sp4)}
+    label{display:grid;gap:.4rem;font-size:var(--text-sm);color:var(--muted)}
+    label strong{color:var(--text)}
+    input,select,textarea{width:100%;min-height:42px;padding:.7rem .9rem;border-radius:var(--r-md);
+      border:1px solid color-mix(in srgb,var(--text) 12%,transparent);
+      background:color-mix(in srgb,var(--surface-off) 82%,transparent);color:var(--text);outline:none}
+    textarea{min-height:180px;resize:vertical;font-family:ui-monospace,monospace;font-size:.85rem}
+    input:focus,select:focus,textarea:focus{
+      border-color:color-mix(in srgb,var(--primary) 70%,white 30%);
+      box-shadow:0 0 0 4px color-mix(in srgb,var(--primary) 16%,transparent)}
+    .dropzone{border:1.5px dashed color-mix(in srgb,var(--primary) 34%,var(--border));
+      background:linear-gradient(180deg,color-mix(in srgb,var(--primary) 8%,transparent),transparent);
+      border-radius:var(--r-xl);padding:var(--sp6);text-align:center;cursor:pointer;transition:.16s ease}
+    .dropzone:hover{border-color:var(--primary)}
+    .dropzone p{color:var(--muted);margin-top:var(--sp2);font-size:var(--text-sm)}
+    .callout{padding:var(--sp4);border-radius:var(--r-lg);
+      background:color-mix(in srgb,var(--primary) 9%,transparent);
+      border:1px solid color-mix(in srgb,var(--primary) 18%,transparent)}
+    .callout.warn{background:var(--warn-hl);border-color:color-mix(in srgb,var(--warn) 24%,transparent)}
+    .callout p{font-size:var(--text-sm);margin-top:var(--sp2);color:var(--muted)}
+    .callout strong{color:var(--text)}
+    .mode-tabs{display:flex;gap:var(--sp2);padding:var(--sp2);
+      background:color-mix(in srgb,var(--surface-off) 70%,transparent);
+      border-radius:var(--r-xl);border:1px solid color-mix(in srgb,var(--text) 9%,transparent);
+      width:fit-content;margin-bottom:var(--sp5)}
+    .mode-tab{min-height:38px;padding:0 var(--sp4);border-radius:var(--r-lg);
+      font-size:var(--text-sm);font-weight:500;color:var(--muted);transition:.16s ease}
+    .mode-tab.active{background:var(--surface2);color:var(--text);
+      box-shadow:var(--sh-sm);border:1px solid color-mix(in srgb,var(--text) 10%,transparent)}
+    .mode-pane{display:none}.mode-pane.active{display:contents}
+    .out-tabs{display:flex;gap:var(--sp2);flex-wrap:wrap}
+    .out-tab{min-height:38px;padding:0 var(--sp4);border-radius:var(--r-full);
+      font-size:var(--text-sm);color:var(--muted);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);transition:.16s ease}
+    .out-tab.active{background:var(--primary);color:#fff;border-color:transparent}
+    .out-pane{display:none;margin-top:var(--sp5)}.out-pane.active{display:block}
+    .stat-row{display:flex;gap:var(--sp4);flex-wrap:wrap;margin-top:var(--sp4)}
+    .stat{padding:var(--sp3) var(--sp4);border-radius:var(--r-lg);
+      background:color-mix(in srgb,var(--surface-off) 80%,transparent);
+      border:1px solid color-mix(in srgb,var(--text) 9%,transparent);min-width:110px}
+    .stat strong{display:block;font-size:1.25rem;font-weight:700}
+    .stat span{font-size:var(--text-xs);color:var(--muted)}
+    .tbl-wrap{overflow:auto;border-radius:var(--r-lg);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);max-height:380px}
+    table{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+    th,td{padding:.75rem .85rem;border-bottom:1px solid var(--divider);text-align:left;vertical-align:top;white-space:nowrap}
+    th{position:sticky;top:0;background:var(--surface-off);z-index:1;font-weight:600}
+    td.wrap{white-space:normal;max-width:220px}
+    tbody tr:hover{background:color-mix(in srgb,var(--primary) 5%,transparent)}
+    .pill{display:inline-flex;align-items:center;padding:.2rem .55rem;border-radius:var(--r-full);
+      font-size:.7rem;font-weight:700;letter-spacing:.03em}
+    .pill-green{background:color-mix(in srgb,var(--success) 16%,transparent);color:var(--success)}
+    .pill-red{background:color-mix(in srgb,var(--error) 14%,transparent);color:var(--error)}
+    .pill-blue{background:color-mix(in srgb,var(--primary) 16%,transparent);color:var(--primary)}
+    .pill-warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+    .mono{font-family:ui-monospace,monospace;font-size:.83rem}
+    .status-line{font-size:var(--text-sm);color:var(--muted);min-height:1.4em;margin-top:var(--sp3)}
+    .divider{border:none;border-top:1px solid var(--divider);margin:var(--sp5) 0}
+    .row{display:flex;align-items:center;gap:var(--sp3);flex-wrap:wrap}
+
+    /* ── PAYEE MAPPING ── */
+    .payee-map-table{overflow:auto;border-radius:var(--r-lg);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);max-height:320px}
+    .payee-map-table th:nth-child(1),.payee-map-table td:nth-child(1){max-width:260px;overflow:hidden;text-overflow:ellipsis}
+    .payee-map-table th:nth-child(2),.payee-map-table td:nth-child(2){max-width:180px}
+    .payee-map-table th:nth-child(3),.payee-map-table td:nth-child(3){width:40px;text-align:center}
+    .payee-suggestion{display:inline-flex;align-items:center;gap:.3rem;
+      background:color-mix(in srgb,var(--primary) 14%,transparent);
+      border:1px solid color-mix(in srgb,var(--primary) 28%,transparent);
+      border-radius:var(--r-full);padding:.15rem .55rem;
+      font-size:var(--text-xs);color:var(--primary);cursor:pointer;transition:.16s ease}
+    .payee-suggestion:hover{background:color-mix(in srgb,var(--primary) 24%,transparent)}
+    .payee-suggestion .apply-btn{font-weight:700}
+    .payee-original{color:var(--faint);font-size:var(--text-xs);font-style:italic}
+    .payee-clean{color:var(--text);font-weight:500}
+    .payee-chip{display:inline-flex;align-items:center;gap:.25rem;
+      background:color-mix(in srgb,var(--surface-off) 80%,transparent);
+      border:1px solid color-mix(in srgb,var(--text) 9%,transparent);
+      border-radius:var(--r-full);padding:.2rem .55rem;font-size:.75rem}
+    .payee-chip .remove{cursor:pointer;color:var(--muted);font-weight:700}
+    .payee-chip .remove:hover{color:var(--error)}
+    .payee-toolbar{display:flex;gap:var(--sp2);align-items:center;margin-bottom:var(--sp4);flex-wrap:wrap}
+    .payee-search{flex:1;min-width:200px}
+    .imported-tag{font-size:.65rem;background:color-mix(in srgb,var(--success) 18%,transparent);
+      color:var(--success);padding:.1rem .4rem;border-radius:var(--r-full);font-weight:600}
+
+    @media(max-width:900px){.grid3,.grid4{grid-template-columns:1fr 1fr}}
+    @media(max-width:600px){.grid2,.grid3,.grid4{grid-template-columns:1fr}.topbar{flex-direction:column;align-items:flex-start}}
+    @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 9h7l2 6 2-6h7"/><line x1="6" y1="6" x2="6" y2="18"/><line x1="18" y1="6" x2="18" y2="18"/>
+        </svg>
+      </div>
+      <div>
+        <h1>MoneyMoney Budget Bridge<span class="badge">v3</span></h1>
+        <p>MoneyMoney → Actual Budget &amp; Ghostfolio · Payee-Cleaning · lokal · kein Upload</p>
+      </div>
+    </div>
+    <div class="toolbar">
+      <button class="btn-sec btn-sm" id="btnDemo">Demo-Daten</button>
+      <button class="btn-sec btn-sm" id="btnPreset">Preset anwenden</button>
+      <button class="btn-ghost btn-sm" id="btnTheme" aria-label="Farbmodus">🌙</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ═══ 1 · QUELLE & KONTO ═══ -->
+    <section class="panel">
+      <div class="panel-title">
+        <div><h2>1 · Quelle &amp; Konto</h2><p>Datei einlesen, Kontodetails festlegen.</p></div>
+      </div>
+      <div class="grid2" style="gap:var(--sp5)">
+        <div>
+          <div class="dropzone" id="dropZone">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto var(--sp3)"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <input type="file" id="fileInput" accept=".csv,.tsv,.txt" style="width:auto;min-height:unset;padding:.3rem .6rem;border-radius:var(--r-md)">
+            <p>CSV oder TSV aus MoneyMoney · Verarbeitung läuft 100% im Browser</p>
+          </div>
+          <div id="fileInfo" class="status-line">Noch keine Datei geladen.</div>
+        </div>
+        <div class="grid2">
+          <label><strong>Kontobezeichnung</strong><input id="accountLabel" placeholder="z. B. DKB Girokonto"></label>
+          <label><strong>Actual-Kontoname</strong><input id="actualAccount" placeholder="z. B. Girokonto"></label>
+          <label><strong>Ghostfolio accountId</strong><input id="ghostAccountId" placeholder="UUID deiner GF-Instanz"></label>
+          <label><strong>Standardwährung</strong><input id="defCurrency" value="EUR" maxlength="8"></label>
+          <label><strong>Datumsformat</strong>
+            <select id="dateFmt">
+              <option value="auto">Auto</option>
+              <option value="de">Deutsch DD.MM.YYYY</option>
+              <option value="iso">ISO YYYY-MM-DD</option>
+            </select>
+          </label>
+          <label><strong>Delimiter</strong>
+            <select id="delimFmt">
+              <option value="auto">Auto</option>
+              <option value=";">Semikolon</option>
+              <option value=",">Komma</option>
+              <option value="tab">Tab</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ 2 · SPALTEN-MAPPING ═══ -->
+    <section class="panel">
+      <div class="panel-title">
+        <div><h2>2 · Spalten-Mapping</h2><p>Einmalig setzen – Preset erkennt MoneyMoney-Spalten automatisch.</p></div>
+        <div id="headerHint" class="status-line" style="text-align:right"></div>
+      </div>
+      <div class="grid4" id="mappingGrid"></div>
+    </section>
+
+    <!-- ═══ 3 · PAYEE-CLEANING & MAPPING ═══ -->
+    <section class="panel" id="payeePanel" style="display:none">
+      <div class="panel-title">
+        <div>
+          <h2>3 · Payee-Cleaning &amp; Namens-Mapping</h2>
+          <p>Verschmutzte Zahlungsbeträge bereinigen und Kurznamen zuweisen. Mappings werden im Browser gespeichert.</p>
+        </div>
+        <div class="row">
+          <span id="payeeStats" class="status-line" style="margin:0"></span>
+        </div>
+      </div>
+
+      <div class="callout" style="margin-bottom:var(--sp4)">
+        <strong>🧹 Automatische Bereinigung</strong>
+        <p>Reguläre Ausdrücke entfernen automatisch Schnickschnack wie <code>//Standort/DE</code>, <code>*Referenznummer*</code>, IBANs, BICs und mehr. Manuelle Zusetzungen überschreiben das Ergebnis.</p>
+        <div class="row" style="margin-top:var(--sp3)">
+          <label style="display:flex;align-items:center;gap:.4rem;font-size:var(--text-sm);color:var(--text);margin:0;cursor:pointer">
+            <input type="checkbox" id="autoClean" checked style="width:auto;min-height:auto">
+            Auto-Bereinigung aktivieren
+          </label>
+        </div>
+      </div>
+
+      <div class="payee-toolbar">
+        <input id="payeeSearch" class="payee-search" placeholder="🔍 Payee suchen...">
+        <span id="payeeCount" class="status-line" style="margin:0"></span>
+        <button class="btn-danger btn-sm" id="btnClearPayees" title="Alle Mappings löschen">Alle löschen</button>
+      </div>
+
+      <div class="payee-map-table tbl-wrap">
+        <table>
+          <thead><tr><th>Original (MoneyMoney)</th><th>Kurzname</th><th></th></tr></thead>
+          <tbody id="payeeMapBody"><tr><td colspan="3" style="color:var(--muted)">Lade Datei, um Payees zu sehen.</td></tr></tbody>
+        </table>
+      </div>
+
+      <div id="payeePreviewSection" style="margin-top:var(--sp4)">
+        <h3 style="font-size:var(--text-sm);color:var(--muted);margin-bottom:var(--sp3)">Vorschau bereinigter Payees</h3>
+        <div id="payeePreview" class="row" style="gap:var(--sp2)"></div>
+      </div>
+    </section>
+
+    <!-- ═══ 4 · GHOSTFOLIO-MODUS ═══ -->
+    <section class="panel">
+      <div class="panel-title">
+        <div><h2>4 · Ghostfolio-Modus</h2><p>Cash-Buchungen oder Wertpapier-Transaktionen – getrennte Ausgaben.</p></div>
+      </div>
+
+      <div class="mode-tabs" role="tablist">
+        <button class="mode-tab active" data-mode="cash" role="tab" aria-selected="true">💶 Cash / Banking</button>
+        <button class="mode-tab" data-mode="securities" role="tab" aria-selected="false">📈 Wertpapiere</button>
+      </div>
+
+      <div class="mode-pane active" id="mode-cash">
+        <div class="callout" style="margin-bottom:var(--sp4)">
+          <strong>Cash-Modus</strong>
+          <p>Erzeugt Ghostfolio-Aktivitäten vom Typ <span class="mono">DEPOSIT</span>, <span class="mono">WITHDRAWAL</span>, <span class="mono">INTEREST</span> oder <span class="mono">FEE</span> mit <span class="mono">dataSource: MANUAL</span>, <span class="mono">quantity: 1</span>, <span class="mono">unitPrice: |Betrag|</span> und <span class="mono">symbol: Währung</span>.</p>
+        </div>
+        <div class="grid4">
+          <label><strong>Typ positiver Beträge</strong>
+            <select id="cashTypePos">
+              <option value="DEPOSIT" selected>DEPOSIT</option>
+              <option value="INTEREST">INTEREST</option>
+              <option value="DIVIDEND">DIVIDEND</option>
+            </select>
+          </label>
+          <label><strong>Typ negativer Beträge</strong>
+            <select id="cashTypeNeg">
+              <option value="WITHDRAWAL" selected>WITHDRAWAL</option>
+              <option value="FEE">FEE</option>
+            </select>
+          </label>
+          <label><strong>Symbol (leer = Währung)</strong>
+            <input id="cashSymbol" placeholder="leer = automatisch EUR/USD…">
+          </label>
+          <label><strong>Vorzeichen drehen</strong>
+            <select id="cashInvert">
+              <option value="false" selected>Nein</option>
+              <option value="true">Ja</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="mode-pane" id="mode-securities">
+        <div class="callout" style="margin-bottom:var(--sp4)">
+          <strong>Wertpapier-Modus</strong>
+          <p>Für Import von Käufen/Verkäufen/Dividenden. Benötigt Spalten für Symbol/ISIN, Menge und Stückpreis.</p>
+        </div>
+        <div class="grid4">
+          <label><strong>Standard-Typ</strong>
+            <select id="secType">
+              <option value="BUY" selected>BUY</option>
+              <option value="SELL">SELL</option>
+              <option value="DIVIDEND">DIVIDEND</option>
+              <option value="auto">Auto aus Vorzeichen</option>
+            </select>
+          </label>
+          <label><strong>Fallback dataSource</strong>
+            <select id="secDataSource">
+              <option value="YAHOO" selected>YAHOO</option>
+              <option value="MANUAL">MANUAL</option>
+              <option value="COINGECKO">COINGECKO</option>
+            </select>
+          </label>
+          <label><strong>Fallback Quantity</strong>
+            <input id="secQtyFallback" value="1" type="number" min="0" step="any">
+          </label>
+          <label><strong>Fallback unitPrice</strong>
+            <input id="secPriceFallback" value="0" type="number" min="0" step="any">
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ 5 · VORSCHAU ═══ -->
+    <section class="panel">
+      <div class="panel-title">
+        <div><h2>5 · Vorschau</h2><p>Normalisierte Zeilen (max. 200 angezeigt).</p></div>
+        <div class="stat-row">
+          <div class="stat"><strong id="sRows">0</strong><span>Zeilen</span></div>
+          <div class="stat"><strong id="sActual">0</strong><span>Actual</span></div>
+          <div class="stat"><strong id="sGhost">0</strong><span>Ghostfolio</span></div>
+          <div class="stat"><strong id="sNet">0,00</strong><span>Saldo</span></div>
+          <div class="stat"><strong id="sIn">0,00</strong><span>Zufluss</span></div>
+          <div class="stat"><strong id="sOut">0,00</strong><span>Abfluss</span></div>
+        </div>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Datum</th><th>Betrag</th><th>Payee (bereinigt)</th><th>Memo</th><th>Kategorie</th><th>GF-Typ</th><th>Symbol</th></tr></thead>
+          <tbody id="previewBody"><tr><td colspan="8" style="color:var(--muted)">Demo-Daten laden oder Datei wählen.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══ 6 · EXPORT ═══ -->
+    <section class="panel">
+      <div class="panel-title"><div><h2>6 · Export</h2><p>Actual Budget CSV, Ghostfolio JSON/CSV oder direkt an API senden.</p></div></div>
+
+      <div class="out-tabs" role="tablist">
+        <button class="out-tab active" data-out="actual">Actual Budget CSV</button>
+        <button class="out-tab" data-out="ghost">Ghostfolio JSON</button>
+        <button class="out-tab" data-out="ghostcsv">Ghostfolio CSV</button>
+        <button class="out-tab" data-out="api">Ghostfolio API</button>
+      </div>
+
+      <div class="out-pane active" id="out-actual">
+        <div class="grid2">
+          <div>
+            <div class="callout">
+              <strong>Actual Budget CSV</strong>
+              <p>Felder: <span class="mono">date, payee, notes, category, amount, account, imported_id</span></p>
+            </div>
+            <div class="row" style="margin-top:var(--sp4)">
+              <button class="btn" id="dlActual">⬇ CSV herunterladen</button>
+              <button class="btn-sec" id="cpActual">Kopieren</button>
+            </div>
+          </div>
+          <label>Vorschau<textarea id="outActual" readonly></textarea></label>
+        </div>
+      </div>
+
+      <div class="out-pane" id="out-ghost">
+        <div class="grid2">
+          <div>
+            <div class="callout">
+              <strong>Ghostfolio JSON</strong>
+              <p>Offizielles Format: <span class="mono">{ meta: { date, version: "v2" }, activities: [...] }</span></p>
+            </div>
+            <div class="row" style="margin-top:var(--sp4)">
+              <button class="btn" id="dlGhost">⬇ JSON herunterladen</button>
+              <button class="btn-sec" id="cpGhost">Kopieren</button>
+            </div>
+          </div>
+          <label>Vorschau<textarea id="outGhost" readonly></textarea></label>
+        </div>
+      </div>
+
+      <div class="out-pane" id="out-ghostcsv">
+        <div class="grid2">
+          <div>
+            <div class="callout">
+              <strong>Ghostfolio CSV</strong>
+              <p>Felder: <span class="mono">date, type, symbol, quantity, unitprice, currency, fee, account, comment</span></p>
+            </div>
+            <div class="row" style="margin-top:var(--sp4)">
+              <button class="btn" id="dlGhostCsv">⬇ CSV herunterladen</button>
+              <button class="btn-sec" id="cpGhostCsv">Kopieren</button>
+            </div>
+          </div>
+          <label>Vorschau<textarea id="outGhostCsv" readonly></textarea></label>
+        </div>
+      </div>
+
+      <div class="out-pane" id="out-api">
+        <div class="grid2">
+          <div class="grid2" style="align-content:start">
+            <label><strong>Endpunkt</strong><input id="apiUrl" value="http://localhost:3333/api/v1/import"></label>
+            <label><strong>Bearer-Token</strong><input id="apiToken" placeholder="Nur lokal verwenden" type="password"></label>
+            <label><strong>HTTP-Methode</strong>
+              <select id="apiMethod"><option value="POST" selected>POST</option><option value="PUT">PUT</option></select>
+            </label>
+            <label><strong>Payload</strong>
+              <select id="apiPayload"><option value="wrap" selected>{ meta, activities }</option><option value="raw">activities-Array direkt</option></select>
+            </label>
+          </div>
+          <div>
+            <div class="callout warn">
+              <strong>Experimentell</strong>
+              <p>Für erste Nutzung ist der Download sicherer. CORS muss erlaubt sein.</p>
+            </div>
+            <div class="row" style="margin-top:var(--sp4)">
+              <button class="btn" id="btnSend">Senden</button>
+              <button class="btn-sec" id="cpPayload">Payload kopieren</button>
+            </div>
+            <div class="status-line" id="apiStatus"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════
+const S = {
+  headers: [], rawRows: [], delimiter: ';',
+  normalized: [], actualCsv: '', gfActivities: [], gfCsv: '',
+  payeeMap: {},        // original → clean name (manual mappings)
+  uniquePayees: [],    // unique payees from loaded data
+  autoClean: true
+};
+
+// ═══════════════════════════════════════════════════════════════
+// PAYEE CLEANING ENGINE
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Regex-Patterns für typischen Schnickschnack in MoneyMoney-Payees.
+ * Reihenfolge matters: spezifischere Patterns zuerst.
+ */
+const CLEAN_PATTERNS = [
+  // PayPal: "PayPal *Name*Referenz" → "PayPal Name"
+  { regex: /PayPal\s+\*(.+?)\*.*/i, replace: 'PayPal $1' },
+  // "Name//Ort/DE" → "Name"
+  { regex: /^(.+?)\/\/[A-Za-zäöüÄÖÜß\s]+\/[A-Z]{2}$/, replace: '$1' },
+  // "Name//Ort" → "Name"
+  { regex: /^(.+?)\/\/[A-Za-zäöüÄÖÜß\s]+$/, replace: '$1' },
+  // "Name *123456*" → "Name"
+  { regex: /^(.+?)\s+\*[\d]+\*$/, replace: '$1' },
+  // "Name / DE12345678901234567890 / ABCDEF..." → "Name"
+  { regex: /^(.+?)\s+\/\s+[A-Z]{2}\d{2}[\d\s]+\s*\/.*$/, replace: '$1' },
+  // IBAN am Ende: "Name DE12 3456 7890 ..." → "Name"
+  { regex: /^(.+?)\s+[A-Z]{2}\d{2}[\d\s]{10,}.*$/, replace: '$1' },
+  // BIC am Ende: "Name ABCDEF..." (8-11 Großbuchstaben) → "Name"
+  { regex: /^(.+?)\s+[A-Z]{8,11}\s*$/, replace: '$1' },
+  // "Name - Referenz: 12345" → "Name"
+  { regex: /^(.+?)\s+-\s+Referenz.*$/i, replace: '$1' },
+  // "Name / Verwendungszweck: ..." → "Name"
+  { regex: /^(.+?)\s+\/\s+Verwendungszweck.*$/i, replace: '$1' },
+  // Mehrere Leerzeichen → eins
+  { regex: /\s{2,}/g, replace: ' ' },
+  // Führende/nachfolgende Leerzeichen
+  { regex: /^\s+|\s+$/g, replace: '' },
+];
+
+/**
+ * Bereinigt einen Payee-String durch Anwendung der Regex-Patterns.
+ * Gibt { cleaned, wasCleaned, matchedPattern } zurück.
+ */
+function cleanPayeeName(raw) {
+  if (!raw || !S.autoClean) return { cleaned: raw || '', wasCleaned: false, matchedPattern: null };
+
+  let cleaned = raw.trim();
+  let wasCleaned = false;
+  let matchedPattern = null;
+
+  for (const pat of CLEAN_PATTERNS) {
+    const before = cleaned;
+    cleaned = cleaned.replace(pat.regex, pat.replace);
+    if (cleaned !== before) {
+      wasCleaned = true;
+      matchedPattern = pat.regex.toString();
+      break; // Nur das erste Matching-Pattern anwenden
+    }
+  }
+
+  // Nochmal trimmen nach Ersetzung
+  cleaned = cleaned.trim();
+
+  return { cleaned, wasCleaned, matchedPattern };
+}
+
+/**
+ * Erzeugt einen Kurznamen-Vorschlag aus einem bereinigten Payee.
+ * Heuristiken für typische MoneyMoney-Payees.
+ */
+function suggestShortName(cleaned) {
+  // Bekannte Muster → Kurzname
+  const KNOWN = [
+    { pattern: /^PayPal\s+(.+)$/i, name: 'PayPal' },
+    { pattern: /^(Amazon|AMAZON)/i, name: 'Amazon' },
+    { pattern: /^(REWE|Rewe)/, name: 'REWE' },
+    { pattern: /^(EDEKA|Edeka)/, name: 'EDEKA' },
+    { pattern: /^(ALDI|aldi|Alnatura)/i, name: 'Aldi' },
+    { pattern: /^(LIDL|Lidl)/i, name: 'Lidl' },
+    { pattern: /^(NETTO|Netto)/i, name: 'Netto' },
+    { pattern: /^(DM|dm|DM-Drogerie)/i, name: 'DM' },
+    { pattern: /^(ROSSMANN|Rossmann)/i, name: 'Rossmann' },
+    { pattern: /^(IKEA|Ikea)/i, name: 'IKEA' },
+    { pattern: /^(H&M|h\s*&\s*m)/i, name: 'H&M' },
+    { pattern: /^(Zalando)/i, name: 'Zalando' },
+    { pattern: /^(Uber\s*Eats)/i, name: 'Uber Eats' },
+    { pattern: /^(Lieferando|lieferando)/i, name: 'Lieferando' },
+    { pattern: /^(Spotify)/i, name: 'Spotify' },
+    { pattern: /^(Netflix)/i, name: 'Netflix' },
+    { pattern: /^(Apple|iTunes)/i, name: 'Apple' },
+    { pattern: /^(Google|Google\s*Play)/i, name: 'Google' },
+    { pattern: /^(Shell|Esso|Aral|Total)\s*(Tankstelle|Station)?/i, name: '$1' },
+    { pattern: /^(DB|Deutsche\s*Bahn)/i, name: 'Deutsche Bahn' },
+    { pattern: /^(Vodafone|o2|T-Mobile|Telekom)/i, name: '$1' },
+    { pattern: /^(Stadtwerke|SWM|M-net)/i, name: '$1' },
+    { pattern: /^(Gehalt|Lohn|Gehalt\s+\w+)/i, name: 'Gehalt' },
+    { pattern: /^(Miete|Mieter)/i, name: 'Miete' },
+    { pattern: /^(HUK|HUK24|Allianz|AXA|DKV|TK|AOK)/i, name: '$1' },
+  ];
+
+  for (const k of KNOWN) {
+    if (k.pattern.test(cleaned)) {
+      return cleaned.replace(k.pattern, k.name);
+    }
+  }
+
+  // Fallback: Erstes Wort (oder erste 2 Wörter wenn erstes Wort sehr kurz)
+  const words = cleaned.split(/\s+/);
+  if (words.length >= 2 && words[0].length <= 2) {
+    return words.slice(0, 2).join(' ');
+  }
+  return words[0] || cleaned;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PAYEE MAPPING STORAGE (localStorage)
+// ═══════════════════════════════════════════════════════════════
+
+const STORAGE_KEY = 'mm-budget-bridge-payee-map';
+
+function loadPayeeMap() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) S.payeeMap = JSON.parse(stored);
+  } catch (e) { S.payeeMap = {}; }
+}
+
+function savePayeeMap() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(S.payeeMap));
+  } catch (e) { /* quota exceeded, ignore */ }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PAYEE MAPPING UI
+// ═══════════════════════════════════════════════════════════════
+
+function renderPayeeMapping() {
+  const tbody = document.getElementById('payeeMapBody');
+  const searchVal = (document.getElementById('payeeSearch')?.value || '').toLowerCase();
+
+  // Collect unique payees from raw data
+  const payeeSet = new Map(); // original → { count, cleaned, suggestion }
+  S.rawRows.forEach(r => {
+    const raw = r.Name || r.payee || r.Empfänger || r.Auftraggeber || '';
+    if (!raw) return;
+    if (!payeeSet.has(raw)) {
+      const { cleaned } = cleanPayeeName(raw);
+      const suggestion = suggestShortName(cleaned);
+      payeeSet.set(raw, { count: 0, cleaned, suggestion });
+    }
+    payeeSet.get(raw).count++;
+  });
+
+  S.uniquePayees = [...payeeSet.entries()];
+
+  // Filter by search
+  const filtered = searchVal
+    ? S.uniquePayees.filter(([raw, info]) =>
+        raw.toLowerCase().includes(searchVal) ||
+        info.cleaned.toLowerCase().includes(searchVal) ||
+        (S.payeeMap[raw] || '').toLowerCase().includes(searchVal))
+    : S.uniquePayees;
+
+  // Update stats
+  const mapped = Object.keys(S.payeeMap).length;
+  document.getElementById('payeeStats').textContent =
+    `${S.uniquePayees.length} Payees · ${mapped} zugeordnet`;
+  document.getElementById('payeeCount').textContent = `Zeige ${filtered.length} von ${S.uniquePayees.length}`;
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--muted)">Keine Payees gefunden.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(([raw, info]) => {
+    const manualName = S.payeeMap[raw];
+    const displayName = manualName || info.cleaned;
+    const isManual = !!manualName;
+    const { cleaned, wasCleaned } = cleanPayeeName(raw);
+
+    return `<tr>
+      <td class="wrap">
+        <div class="payee-original" title="${esc(raw)}">${esc(raw)}</div>
+        ${wasCleaned && !isManual ? `<div class="payee-clean">→ ${esc(cleaned)}</div>` : ''}
+      </td>
+      <td>
+        <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap">
+          <input type="text" class="payee-name-input" data-raw="${esc(raw)}"
+            value="${esc(displayName)}" placeholder="${esc(info.suggestion)}"
+            style="min-height:34px;padding:.4rem .6rem;font-size:var(--text-sm);flex:1;min-width:120px">
+          ${isManual ? '<span class="imported-tag">MANUELL</span>' : ''}
+        </div>
+        ${!isManual ? `<div class="payee-suggestion" data-raw="${esc(raw)}" data-suggestion="${esc(info.suggestion)}">
+          <span>💡</span><span class="apply-btn">${esc(info.suggestion)}</span> übernehmen
+        </div>` : ''}
+      </td>
+      <td>
+        ${isManual ? `<button class="payee-reset" data-raw="${esc(raw)}" title="Zurücksetzen">✕</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+
+  // Event listeners for payee inputs
+  tbody.querySelectorAll('.payee-name-input').forEach(input => {
+    input.addEventListener('change', e => {
+      const raw = e.target.dataset.raw;
+      const val = e.target.value.trim();
+      if (val) {
+        S.payeeMap[raw] = val;
+      } else {
+        delete S.payeeMap[raw];
+      }
+      savePayeeMap();
+      renderPayeeMapping(); // Re-render to update tags
+      renderAll();
+    });
+  });
+
+  // Suggestion apply buttons
+  tbody.querySelectorAll('.payee-suggestion').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const raw = e.currentTarget.dataset.raw;
+      const suggestion = e.currentTarget.dataset.suggestion;
+      S.payeeMap[raw] = suggestion;
+      savePayeeMap();
+      renderPayeeMapping();
+      renderAll();
+    });
+  });
+
+  // Reset buttons
+  tbody.querySelectorAll('.payee-reset').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const raw = e.target.dataset.raw;
+      delete S.payeeMap[raw];
+      savePayeeMap();
+      renderPayeeMapping();
+      renderAll();
+    });
+  });
+
+  // Render preview chips
+  renderPayeePreview();
+}
+
+function renderPayeePreview() {
+  const container = document.getElementById('payeePreview');
+  if (!container) return;
+
+  const entries = S.uniquePayees.slice(0, 12);
+  container.innerHTML = entries.map(([raw, info]) => {
+    const name = S.payeeMap[raw] || info.cleaned;
+    const isManual = !!S.payeeMap[raw];
+    return `<span class="payee-chip" title="${esc(raw)}">
+      ${esc(name)}${isManual ? '' : ' *'}
+      <span class="remove" data-raw="${esc(raw)}" title="Mapping entfernen">✕</span>
+    </span>`;
+  }).join('');
+
+  container.querySelectorAll('.remove').forEach(btn => {
+    btn.addEventListener('click', e => {
+      delete S.payeeMap[e.target.dataset.raw];
+      savePayeeMap();
+      renderPayeeMapping();
+      renderAll();
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MAPPING FIELDS
+// ═══════════════════════════════════════════════════════════════
+
+const MAPPING_FIELDS = [
+  ['date','Datum'],['valueDate','Wertstellung'],['amount','Betrag'],['currency','Währung'],
+  ['payee','Name (Payee)'],['purpose','Verwendungszweck'],['category','Kategorie'],
+  ['note','Konto / Notiz'],['bank','Bank'],['type','GF Typ (Spalte)'],
+  ['symbol','Symbol / Ticker'],['isin','ISIN'],['quantity','Menge'],
+  ['unitPrice','Stückpreis'],['fee','Gebühr'],['id','Import-ID']
+];
+
+// ═══════════════════════════════════════════════════════════════
+// DEMO DATA
+// ═══════════════════════════════════════════════════════════════
+
+const DEMO = [
+  'Datum;Wertstellung;Kategorie;Name;Verwendungszweck;Konto;Bank;Betrag;Währung',
+  '25.05.2026;25.05.2026;Lebensmittel;REWE Markt Schmidt//Langenzenn/DE;Einkauf Wochenendeinkauf;DE12345678901234567890;SSKMDEMMXXX;-54,90;EUR',
+  '24.05.2026;24.05.2026;Einkommen;Musterfirma GmbH;Gehalt Mai 2026;DE12345678901234567890;SSKMDEMMXXX;3200,00;EUR',
+  '23.05.2026;23.05.2026;Nebenkosten;Stadtwerke München;Stromabschlag Mai;DE12345678901234567890;SSKMDEMMXXX;-89,00;EUR',
+  '22.05.2026;22.05.2026;Zinsen;DKB AG;Habenzinsen April;DE98765432101234567890;BELADEBEXXX;7,12;EUR',
+  '21.05.2026;21.05.2026;Versicherung;HUK24 AG / HUK-Coburg;KFZ-Versicherung Beitrag Hj.2026;DE12345678901234567890;SSKMDEMMXXX;-234,56;EUR',
+  '20.05.2026;20.05.2026;Online;PayPal *Amazon*12345678;Bestellung Bücher;DE12345678901234567890;SSKMDEMMXXX;-29,99;EUR',
+  '19.05.2026;19.05.2026;Mobilität;Shell Tankstelle München;Tanken;DE12345678901234567890;SSKMDEMMXXX;-68,40;EUR',
+  '18.05.2026;18.05.2026;Essen;Uber Eats//Berlin/DE;Essen bestellen;DE12345678901234567890;SSKMDEMMXXX;-18,75;EUR',
+].join('\n');
+
+// ═══════════════════════════════════════════════════════════════
+// DOM REFS
+// ═══════════════════════════════════════════════════════════════
+
+const $ = id => document.getElementById(id);
+const el = {
+  file:$('fileInput'), fileInfo:$('fileInfo'), mappingGrid:$('mappingGrid'), headerHint:$('headerHint'),
+  previewBody:$('previewBody'), outActual:$('outActual'), outGhost:$('outGhost'), outGhostCsv:$('outGhostCsv'),
+  accountLabel:$('accountLabel'), actualAccount:$('actualAccount'),
+  ghostAccountId:$('ghostAccountId'), defCurrency:$('defCurrency'),
+  dateFmt:$('dateFmt'), delimFmt:$('delimFmt'),
+  cashTypePos:$('cashTypePos'), cashTypeNeg:$('cashTypeNeg'),
+  cashSymbol:$('cashSymbol'), cashInvert:$('cashInvert'),
+  secType:$('secType'), secDataSource:$('secDataSource'),
+  secQtyFallback:$('secQtyFallback'), secPriceFallback:$('secPriceFallback'),
+  sRows:$('sRows'), sActual:$('sActual'), sGhost:$('sGhost'),
+  sNet:$('sNet'), sIn:$('sIn'), sOut:$('sOut'),
+  apiUrl:$('apiUrl'), apiToken:$('apiToken'), apiMethod:$('apiMethod'),
+  apiPayload:$('apiPayload'), apiStatus:$('apiStatus'),
+  payeePanel:$('payeePanel'), autoClean:$('autoClean'), payeeSearch:$('payeeSearch'),
+  btnClearPayees:$('btnClearPayees'), dropZone:$('dropZone')
+};
+
+// ═══════════════════════════════════════════════════════════════
+// MODE TABS (cash / securities)
+// ═══════════════════════════════════════════════════════════════
+
+let currentMode = 'cash';
+document.querySelectorAll('[data-mode]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    currentMode = btn.dataset.mode;
+    document.querySelectorAll('[data-mode]').forEach(b => { b.classList.toggle('active', b===btn); b.setAttribute('aria-selected', b===btn); });
+    document.querySelectorAll('.mode-pane').forEach(p => p.classList.toggle('active', p.id===`mode-${currentMode}`));
+    renderAll();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// OUTPUT TABS
+// ═══════════════════════════════════════════════════════════════
+
+document.querySelectorAll('[data-out]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-out]').forEach(b => b.classList.toggle('active', b===btn));
+    document.querySelectorAll('.out-pane').forEach(p => p.classList.toggle('active', p.id===`out-${btn.dataset.out}`));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// THEME
+// ═══════════════════════════════════════════════════════════════
+
+let theme = matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light';
+document.documentElement.setAttribute('data-theme', theme);
+$('btnTheme').addEventListener('click', () => {
+  theme = theme==='dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', theme);
+  $('btnTheme').textContent = theme==='dark' ? '🌙' : '☀️';
+});
+
+// ═══════════════════════════════════════════════════════════════
+// CSV PARSER
+// ═══════════════════════════════════════════════════════════════
+
+function detectDelimiter(text) {
+  const m = el.delimFmt.value;
+  if (m==='tab') return '\t';
+  if (m!=='auto') return m;
+  const sample = text.slice(0,2000);
+  return [[';',(sample.match(/;/g)||[]).length],[',',(sample.match(/,/g)||[]).length],['\t',(sample.match(/\t/g)||[]).length]]
+    .sort((a,b)=>b[1]-a[1])[0][0];
+}
+
+function parseDelimited(text, sep) {
+  const rows=[]; let row=[], val='', inQ=false;
+  for (let i=0;i<text.length;i++) {
+    const c=text[i], n=text[i+1];
+    if (c==='"') { if(inQ&&n==='"'){val+='"';i++;}else{inQ=!inQ;} continue; }
+    if (!inQ&&c===sep) { row.push(val);val='';continue; }
+    if (!inQ&&(c==='\n'||c==='\r')) {
+      if(c==='\r'&&n==='\n')i++;
+      row.push(val); if(row.some(x=>x!==''))rows.push(row);
+      row=[];val='';continue;
+    }
+    val+=c;
+  }
+  if(val||row.length){row.push(val);rows.push(row);}
+  const [hdr,...data]=rows;
+  const headers=(hdr||[]).map(h=>h.trim());
+  const objects=data.filter(r=>r.some(x=>x.trim()!=='')).map(r=>{
+    const o={};headers.forEach((h,i)=>o[h]=(r[i]||'').trim());return o;
+  });
+  return {headers,rows:objects};
+}
+
+// ═══════════════════════════════════════════════════════════════
+// NUMBER / DATE PARSING
+// ═══════════════════════════════════════════════════════════════
+
+function parseNum(v) {
+  if(v==null||v==='') return null;
+  const s=String(v).trim().replace(/\s/g,'').replace(/\.(?=\d{3}(\D|$))/g,'').replace(',','.');
+  const n=Number(s);
+  return isFinite(n)?n:null;
+}
+
+function parseDate(v) {
+  if(!v) return '';
+  const s=String(v).trim();
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const fmt=el.dateFmt.value;
+  const de=s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})$/);
+  if(de&&(fmt==='de'||fmt==='auto')){
+    let [,d,m,y]=de;if(y.length===2)y='20'+y;
+    return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+  }
+  const p=new Date(s);
+  return isNaN(p)?s:p.toISOString().slice(0,10);
+}
+
+function toIsoZ(dateStr) {
+  if(!dateStr) return new Date().toISOString();
+  if(/^\d{4}-\d{2}-\d{2}T/.test(dateStr)) return dateStr;
+  return dateStr+'T00:00:00.000Z';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MAPPING HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+function buildMappingGrid(headers=[]) {
+  el.mappingGrid.innerHTML='';
+  MAPPING_FIELDS.forEach(([key,lbl])=>{
+    const wrap=document.createElement('label');
+    const sel=document.createElement('select');
+    sel.dataset.map=key;
+    sel.innerHTML=`<option value="">– nicht verwenden –</option>`+
+      headers.map(h=>`<option value="${h.replace(/"/g,'&quot;')}">${h}</option>`).join('');
+    wrap.innerHTML=`<strong>${lbl}</strong>`;
+    wrap.appendChild(sel);
+    el.mappingGrid.appendChild(wrap);
+  });
+}
+
+function getMap() {
+  return Object.fromEntries([...document.querySelectorAll('[data-map]')].map(s=>[s.dataset.map,s.value]));
+}
+
+function setMap(key,val) {
+  const s=document.querySelector(`[data-map="${key}"]`);
+  if(s&&val) { for(const o of s.options) if(o.value===val){s.value=val;return;} }
+}
+
+function applyPreset() {
+  const h=S.headers;
+  const find=(...pats)=>h.find(hh=>pats.some(p=>hh===p))||h.find(hh=>pats.some(p=>hh.toLowerCase().includes(p.toLowerCase())));
+  setMap('date',     find('Datum','Buchungstag','Buchungsdatum'));
+  setMap('valueDate',find('Wertstellung','Valuta'));
+  setMap('amount',   find('Betrag','Amount','Umsatz'));
+  setMap('currency', find('Währung','Waehrung','Currency'));
+  setMap('payee',    find('Name','Empfänger','Auftraggeber','Payee'));
+  setMap('purpose',  find('Verwendungszweck','Purpose','Beschreibung','Memo','Buchungstext'));
+  setMap('category', find('Kategorie','Category'));
+  setMap('note',     find('Konto','Kommentar','Note','Notiz'));
+  setMap('bank',     find('Bank','BIC','Institut'));
+  setMap('id',       find('Umsatz-ID','ID','Referenz'));
+  renderAll();
+}
+
+function pickVal(row,key,fb='') {
+  const m=getMap();
+  return m[key] ? (row[m[key]]??fb) : fb;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PAYEE RESOLUTION (clean + manual mapping)
+// ═══════════════════════════════════════════════════════════════
+
+function resolvePayee(rawPayee) {
+  // 1. Check manual mapping first
+  if (S.payeeMap[rawPayee]) {
+    return { name: S.payeeMap[rawPayee], source: 'manual' };
+  }
+  // 2. Auto-clean
+  const { cleaned } = cleanPayeeName(rawPayee);
+  return { name: cleaned, source: 'auto' };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// NORMALIZATION
+// ═══════════════════════════════════════════════════════════════
+
+function normalizeRows() {
+  const invert=el.cashInvert.value==='true';
+  return S.rawRows.map((row,idx)=>{
+    let amt=parseNum(pickVal(row,'amount'));
+    if(amt!==null&&invert) amt*=-1;
+    const date=parseDate(pickVal(row,'date')||pickVal(row,'valueDate'));
+    const currency=(pickVal(row,'currency')||el.defCurrency.value||'EUR').trim().toUpperCase();
+
+    // Payee resolution with cleaning
+    const rawPayee = pickVal(row,'payee')||'Unbekannt';
+    const { name: resolvedPayee } = resolvePayee(rawPayee);
+
+    const parts=[pickVal(row,'purpose'),pickVal(row,'note')].filter(Boolean);
+    const memo=parts.join(' | ');
+    const category=pickVal(row,'category');
+    const symbol=pickVal(row,'symbol');
+    const isin=pickVal(row,'isin');
+    const quantity=parseNum(pickVal(row,'quantity'));
+    const unitPrice=parseNum(pickVal(row,'unitPrice'));
+    const fee=parseNum(pickVal(row,'fee'));
+    const id=pickVal(row,'id')||`${slugify(el.accountLabel.value||'konto')}-${date||'nd'}-${idx+1}`;
+
+    let gfType;
+    if(currentMode==='cash') {
+      const explicit=pickVal(row,'type');
+      if(explicit) gfType=explicit.toUpperCase();
+      else gfType=(amt!=null&&amt<0) ? el.cashTypeNeg.value : el.cashTypePos.value;
+    } else {
+      const t=el.secType.value;
+      if(t==='auto') gfType=(amt!=null&&amt<0)?'SELL':'BUY';
+      else gfType=t;
+    }
+
+    return {idx:idx+1, date, amount:amt, currency, payee:resolvedPayee, rawPayee, memo, category,
+      gfType, symbol, isin, quantity, unitPrice, fee, id, row};
+  }).filter(r=>r.date||r.amount!=null);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACTUAL BUDGET CSV
+// ═══════════════════════════════════════════════════════════════
+
+function csvEsc(v) {
+  const s=String(v??'');
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+}
+
+function buildActualCsv(rows) {
+  const hdr=['date','payee','notes','category','amount','account','imported_id'];
+  const data=rows.map(r=>[
+    r.date, r.payee, r.memo, r.category,
+    r.amount==null?'':r.amount.toFixed(2),
+    el.actualAccount.value||el.accountLabel.value||'',
+    r.id
+  ]);
+  return [hdr,...data].map(line=>line.map(csvEsc).join(',')).join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GHOSTFOLIO JSON
+// ═══════════════════════════════════════════════════════════════
+
+function buildGhostfolioActivities(rows) {
+  return rows.map(r=>{
+    const absAmt=r.amount==null?0:Math.abs(r.amount);
+    const isoDate=toIsoZ(r.date);
+
+    let symbol, dataSource, quantity, unitPrice;
+
+    if(currentMode==='cash') {
+      symbol = (el.cashSymbol.value.trim()||r.currency||el.defCurrency.value||'EUR').toUpperCase();
+      dataSource = 'MANUAL';
+      quantity = 1;
+      unitPrice = absAmt;
+    } else {
+      const fb_ds=el.secDataSource.value;
+      symbol = r.symbol || r.isin || 'UNKNOWN';
+      dataSource = r.isin ? 'MANUAL' : fb_ds;
+      quantity = r.quantity!=null ? r.quantity : parseFloat(el.secQtyFallback.value)||1;
+      unitPrice = r.unitPrice!=null ? r.unitPrice : parseFloat(el.secPriceFallback.value)||absAmt;
+    }
+
+    const act = {
+      currency: r.currency||el.defCurrency.value||'EUR',
+      dataSource,
+      date: isoDate,
+      fee: r.fee??0,
+      quantity,
+      symbol,
+      type: r.gfType,
+      unitPrice,
+      comment: r.memo||undefined,
+      accountId: el.ghostAccountId.value||undefined
+    };
+    return Object.fromEntries(Object.entries(act).filter(([,v])=>v!==undefined&&v!==''));
+  });
+}
+
+function buildGhostfolioExport(activities) {
+  return {
+    meta: { date: new Date().toISOString(), version: 'v2' },
+    activities
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GHOSTFOLIO CSV
+// ═══════════════════════════════════════════════════════════════
+
+function buildGhostfolioCsv(rows) {
+  const hdr=['date','type','symbol','quantity','unitprice','currency','fee','account','comment'];
+  const data=rows.map(r=>{
+    const absAmt=r.amount==null?0:Math.abs(r.amount);
+    let symbol, quantity, unitPrice;
+
+    if(currentMode==='cash') {
+      symbol = (el.cashSymbol.value.trim()||r.currency||el.defCurrency.value||'EUR').toUpperCase();
+      quantity = 1;
+      unitPrice = absAmt;
+    } else {
+      symbol = r.symbol || r.isin || 'UNKNOWN';
+      quantity = r.quantity!=null ? r.quantity : parseFloat(el.secQtyFallback.value)||1;
+      unitPrice = r.unitPrice!=null ? r.unitPrice : parseFloat(el.secPriceFallback.value)||absAmt;
+    }
+
+    return [
+      r.date,
+      r.gfType,
+      symbol,
+      quantity,
+      unitPrice.toFixed(2),
+      r.currency||el.defCurrency.value||'EUR',
+      (r.fee??0).toFixed(2),
+      el.ghostAccountId.value||'',
+      r.memo ? csvEsc(r.memo) : ''
+    ];
+  });
+  return [hdr,...data].map(line=>line.join(',')).join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════════════════════════════
+
+const fmt=v=>new Intl.NumberFormat('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}).format(v||0);
+function slugify(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'export';}
+function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function pillType(t) {
+  if(['DEPOSIT','INTEREST','DIVIDEND','BUY'].includes(t)) return `<span class="pill pill-green">${t}</span>`;
+  if(['WITHDRAWAL','FEE','SELL'].includes(t)) return `<span class="pill pill-red">${t}</span>`;
+  return `<span class="pill pill-blue">${t}</span>`;
+}
+
+function renderPreview(rows) {
+  if(!rows.length){el.previewBody.innerHTML='<tr><td colspan="8" style="color:var(--muted)">Keine Daten.</td></tr>';return;}
+  el.previewBody.innerHTML=rows.slice(0,200).map(r=>`<tr>
+    <td>${r.idx}</td><td>${esc(r.date)}</td>
+    <td style="text-align:right;font-variant-numeric:tabular-nums">${r.amount!=null?esc(fmt(r.amount)):''}</td>
+    <td class="wrap" title="${esc(r.rawPayee||r.payee)}">
+      <span class="payee-clean">${esc(r.payee)}</span>
+      ${r.rawPayee && r.rawPayee!==r.payee ? `<span class="payee-original"> (${esc(r.rawPayee)})</span>` : ''}
+    </td>
+    <td class="wrap">${esc(r.memo)}</td>
+    <td>${esc(r.category)}</td>
+    <td>${pillType(r.gfType)}</td>
+    <td class="mono">${esc(r.symbol||'')}</td>
+  </tr>`).join('');
+}
+
+function renderStats(rows) {
+  const amts=rows.map(r=>r.amount).filter(v=>typeof v==='number');
+  el.sRows.textContent=S.rawRows.length;
+  el.sActual.textContent=rows.length;
+  el.sGhost.textContent=S.gfActivities.length;
+  el.sNet.textContent=fmt(amts.reduce((a,b)=>a+b,0));
+  el.sIn.textContent=fmt(amts.filter(v=>v>0).reduce((a,b)=>a+b,0));
+  el.sOut.textContent=fmt(amts.filter(v=>v<0).reduce((a,b)=>a+Math.abs(b),0));
+}
+
+function renderAll() {
+  if(!S.rawRows.length){
+    renderPreview([]);renderStats([]);
+    el.outActual.value='';el.outGhost.value='';el.outGhostCsv.value='';
+    return;
+  }
+  S.normalized=normalizeRows();
+  S.actualCsv=buildActualCsv(S.normalized);
+  S.gfActivities=buildGhostfolioActivities(S.normalized);
+  S.gfCsv=buildGhostfolioCsv(S.normalized);
+  el.outActual.value=S.actualCsv;
+  el.outGhost.value=JSON.stringify(buildGhostfolioExport(S.gfActivities),null,2);
+  el.outGhostCsv.value=S.gfCsv;
+  renderPreview(S.normalized);
+  renderStats(S.normalized);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FILE LOADING
+// ═══════════════════════════════════════════════════════════════
+
+function loadText(text, label) {
+  S.delimiter=detectDelimiter(text);
+  const {headers,rows}=parseDelimited(text,S.delimiter);
+  S.headers=headers; S.rawRows=rows;
+  buildMappingGrid(headers);
+  el.headerHint.textContent=`${headers.length} Spalten · Delimiter: ${S.delimiter==='\t'?'Tab':S.delimiter}`;
+  el.fileInfo.textContent=label||`${rows.length} Zeilen geladen`;
+  el.payeePanel.style.display='';
+  applyPreset();
+  renderPayeeMapping();
+}
+
+el.dropZone.addEventListener('click', () => el.file.click());
+el.dropZone.addEventListener('dragover', e => { e.preventDefault(); el.dropZone.style.borderColor='var(--primary)'; });
+el.dropZone.addEventListener('dragleave', () => { el.dropZone.style.borderColor=''; });
+el.dropZone.addEventListener('drop', e => {
+  e.preventDefault(); el.dropZone.style.borderColor='';
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+el.file.addEventListener('change', e => {
+  if (e.target.files.length) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    loadText(e.target.result, `${file.name} · ${file.size.toLocaleString('de')} Byte`);
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DEMO / PRESET BUTTONS
+// ═══════════════════════════════════════════════════════════════
+
+$('btnDemo').addEventListener('click',()=>{
+  if(!el.accountLabel.value) el.accountLabel.value='DKB Girokonto';
+  if(!el.actualAccount.value) el.actualAccount.value='Girokonto';
+  loadText(DEMO,'Demo-Daten (8 Zeilen MoneyMoney-Format)');
+});
+
+$('btnPreset').addEventListener('click', applyPreset);
+
+// ═══════════════════════════════════════════════════════════════
+// PAYEE UI EVENTS
+// ═══════════════════════════════════════════════════════════════
+
+el.autoClean.addEventListener('change', () => {
+  S.autoClean = el.autoClean.checked;
+  renderPayeeMapping();
+  renderAll();
+});
+
+el.payeeSearch.addEventListener('input', () => renderPayeeMapping());
+
+el.btnClearPayees.addEventListener('click', () => {
+  if (confirm('Alle Payee-Mappings löschen?')) {
+    S.payeeMap = {};
+    savePayeeMap();
+    renderPayeeMapping();
+    renderAll();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// REACTIVE RE-RENDER
+// ═══════════════════════════════════════════════════════════════
+
+document.addEventListener('change', e=>{
+  if(e.target.matches('[data-map],#dateFmt,#delimFmt,#defCurrency,#cashTypePos,#cashTypeNeg,#cashSymbol,#cashInvert,#secType,#secDataSource,#secQtyFallback,#secPriceFallback')) renderAll();
+});
+document.addEventListener('input', e=>{
+  if(e.target.matches('#accountLabel,#actualAccount,#ghostAccountId,#defCurrency')) renderAll();
+});
+
+// ═══════════════════════════════════════════════════════════════
+// DOWNLOAD / COPY
+// ═══════════════════════════════════════════════════════════════
+
+function dl(name,content,mime){
+  const b=new Blob([content],{type:mime});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; a.click(); URL.revokeObjectURL(a.href);
+}
+async function cp(text,msg){
+  try{await navigator.clipboard.writeText(text);el.apiStatus.textContent=msg;}
+  catch{el.apiStatus.textContent='Kopieren blockiert.';}
+}
+
+$('dlActual').addEventListener('click',()=>dl(`${slugify(el.actualAccount.value||'actual')}-actual.csv`,S.actualCsv,'text/csv;charset=utf-8'));
+$('dlGhost').addEventListener('click',()=>dl(`${slugify(el.accountLabel.value||'ghostfolio')}-ghostfolio.json`,JSON.stringify(buildGhostfolioExport(S.gfActivities),null,2),'application/json;charset=utf-8'));
+$('dlGhostCsv').addEventListener('click',()=>dl(`${slugify(el.accountLabel.value||'ghostfolio')}-ghostfolio.csv`,S.gfCsv,'text/csv;charset=utf-8'));
+$('cpActual').addEventListener('click',()=>cp(S.actualCsv,'Actual-CSV kopiert.'));
+$('cpGhost').addEventListener('click',()=>cp(JSON.stringify(buildGhostfolioExport(S.gfActivities),null,2),'Ghostfolio-JSON kopiert.'));
+$('cpGhostCsv').addEventListener('click',()=>cp(S.gfCsv,'Ghostfolio-CSV kopiert.'));
+$('cpPayload').addEventListener('click',()=>{
+  const p=el.apiPayload.value==='wrap'?buildGhostfolioExport(S.gfActivities):S.gfActivities;
+  cp(JSON.stringify(p,null,2),'Payload kopiert.');
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GHOSTFOLIO API
+// ═══════════════════════════════════════════════════════════════
+
+$('btnSend').addEventListener('click', async()=>{
+  el.apiStatus.textContent='Sende…';
+  const payload=el.apiPayload.value==='wrap'?buildGhostfolioExport(S.gfActivities):S.gfActivities;
+  try{
+    const r=await fetch(el.apiUrl.value.trim(),{
+      method:el.apiMethod.value,
+      headers:{'Content-Type':'application/json',...(el.apiToken.value.trim()?{Authorization:`Bearer ${el.apiToken.value.trim()}`}:{})},
+      body:JSON.stringify(payload)
+    });
+    const t=await r.text();
+    el.apiStatus.textContent=r.ok?`✓ ${r.status} – Import angenommen.`:`✗ ${r.status}: ${t.slice(0,300)}`;
+  }catch(e){el.apiStatus.textContent=`Fehler: ${e.message}`;}
+});
+
+// ═══════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════
+
+loadPayeeMap();
+buildMappingGrid();
+renderAll();
+</script>
+</body>
+</html>
