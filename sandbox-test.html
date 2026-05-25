@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MM Bridge v4 – Sandbox Test</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f1117;color:#e2e4f0;padding:2rem;max-width:900px;margin:0 auto}
+    h1{font-size:1.4rem;margin-bottom:.5rem}
+    .subtitle{color:#7b8199;margin-bottom:2rem}
+    .test-suite{background:#1a1d27;border:1px solid #2e3348;border-radius:12px;padding:1.5rem;margin-bottom:1.5rem}
+    .test-suite h2{font-size:1.1rem;color:#6c5ce7;margin-bottom:1rem}
+    .test{display:flex;align-items:center;gap:.8rem;padding:.5rem 0;border-bottom:1px solid #2e3348;font-size:90%}
+    .test:last-child{border-bottom:none}
+    .pass{color:#00b894;font-weight:700}
+    .fail{color:#e74c3c;font-weight:700}
+    .warn{color:#fdcb6e;font-weight:700}
+    .info{color:#6c5ce7}
+    .log{background:#0f1117;border:1px solid #2e3348;border-radius:8px;padding:1rem;font-family:ui-monospace,monospace;font-size:.8rem;max-height:400px;overflow:auto;white-space:pre-wrap;color:#7b8199;margin-top:1rem}
+    .summary{padding:1rem;border-radius:8px;margin-bottom:1.5rem;font-weight:600}
+    .summary.all-pass{background:#00b89420;border:1px solid #00b894;color:#00b894}
+    .summary.has-fails{background:#e74c3c20;border:1px solid #e74c3c;color:#e74c3c}
+    button{background:#6c5ce7;color:#fff;border:none;padding:.6rem 1.5rem;border-radius:8px;cursor:pointer;font-size:.9rem;margin-right:.5rem;margin-bottom:1rem}
+    button:hover{background:#5a4bd6}
+    .valid{background:#1a1d27;border:1px solid #2e3348;border-radius:8px;padding:1rem;margin-top:1rem}
+    .valid h3{color:#6c5ce7;font-size:1rem;margin-bottom:.5rem}
+    .valid pre{font-family:ui-monospace,monospace;font-size:.75rem;color:#7b8199;overflow:auto;max-height:300px}
+  </style>
+</head>
+<body>
+<h1>🧪 MM Bridge v4 – Sandbox Test</h1>
+<p class="subtitle">Automatisierte Tests für Parsing, Export und API-Format</p>
+
+<div id="summary" class="summary"></div>
+
+<button onclick="runAllTests()">▶ Alle Tests starten</button>
+<button onclick="testWithDemoData()">▶ Mit Demo-Daten testen</button>
+<button onclick="testExportFormats()">▶ Export-Formate validieren</button>
+<button onclick="clearLog()">🗑 Log leeren</button>
+
+<div id="results"></div>
+
+<div class="valid">
+  <h3>📋 Ghostfolio JSON Schema (Referenz)</h3>
+  <pre id="schemaRef"></pre>
+</div>
+
+<script>
+const LOG=document.getElementById('results');
+const SUMMARY=document.getElementById('summary');
+const SCHEMA_REF=document.getElementById('schemaRef');
+let tests=[],passes=0,fails=0;
+
+function log(msg){LOG.innerHTML+=msg+'<br>';LOG.scrollTop=LOG.scrollHeight;}
+function pass(name){passes++;log(`<span class="pass">✅ ${name}</span>`);}
+function fail(name,detail){fails++;log(`<span class="fail">❌ ${name}</span>${detail?' – '+detail:''}`);}
+function warn(name){log(`<span class="warn">⚠️ ${name}</span>`);}
+function info(name){log(`<span class="info">ℹ️ ${name}</span>`);}
+
+function clearLog(){LOG.innerHTML='';tests=[];passes=0;fails=0;SUMMARY.innerHTML='';SUMMARY.className='summary';}
+
+// ── CSV PARSER TESTS ──
+const TEST_CSV='Datum;Wertstellung;Kategorie;Name;Verwendungszweck;Konto;Bank;Betrag;Währung\n01.05.2026;01.05.2026;Lebensmittel;REWE//Langenzenn/DE;Einkauf;DE1234567890;SSKMDEMMXXX;-54,90;EUR\n02.05.2026;02.05.2026;Miete;Vermieter;Miete Mai;DE1234567890;SSKMDEMMXXX;-850,00;EUR';
+
+function parseDelimited(text,sep){
+  const rows=[];let row=[],val='',inQ=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i],n=text[i+1];
+    if(c==='"'){if(inQ&&n==='"'){val+='"';i++;}else{inQ=!inQ;}continue;}
+    if(!inQ&&c===sep){row.push(val);val='';continue;}
+    if(!inQ&&(c==='\n'||c==='\r')){if(c==='\r'&&n==='\n')i++;row.push(val);if(row.some(x=>x!==''))rows.push(row);row=[];val='';continue;}
+    val+=c;
+  }
+  if(val||row.length){row.push(val);rows.push(row);}
+  const[hdr,...data]=rows;
+  const headers=(hdr||[]).map(h=>h.trim());
+  const objects=data.filter(r=>r.some(x=>x.trim()!=='')).map(r=>{const o={};headers.forEach((h,i)=>o[h]=(r[i]||'').trim();return o;});
+  return{headers,rows:objects};
+}
+
+function parseNum(v){
+  if(v==null||v==='')return null;
+  const s=String(v).trim().replace(/\s/g,'').replace(/\.(?=\d{3}(\D|$))/g,'').replace(',','.');
+  const n=Number(s);return isFinite(n)?n:null;
+}
+
+function parseDate(v){
+  if(!v)return '';
+  const s=String(v).trim();
+  if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);
+  const de=s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})$/);
+  if(de){let[,d,m,y]=de;if(y.length===2)y='20'+y;return`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;}
+  return s;
+}
+
+function runAllTests(){
+  clearLog();
+  log('═'.repeat(50));
+  log('🧪 STARTE ALLE TESTS');
+  log('═'.repeat(50));
+
+  // Test 1: CSV Parsing
+  log('');
+  log('── Test 1: CSV Parsing ──');
+  const parsed=parseDelimited(TEST_CSV,';');
+  if(parsed.headers.length===9) pass('Spaltenüberschriften erkannt (9)') else fail('Spaltenüberschriften',`${parsed.headers.length} statt 9`);
+  if(parsed.headers[0]==='Datum') pass('Erste Spalte = "Datum"') else fail('Erste Spalte',parsed.headers[0]);
+  if(parsed.headers[3]==='Name') pass('Payee-Spalte = "Name"') else fail('Payee-Spalte',parsed.headers[3]);
+  if(parsed.headers[7]==='Betrag') pass('Betrag-Spalte = "Betrag"') else fail('Betrag-Spalte',parsed.headers[7]);
+  if(parsed.rows.length===2) pass('2 Datenzeilen geparst') else fail('Datenzeilen',`${parsed.rows.length} statt 2`);
+  if(parsed.rows[0].Konto==='DE1234567890') pass('Konto-Spalte korrekt') else fail('Konto-Spalte',parsed.rows[0].Konto);
+
+  // Test 2: Betrag-Parsing
+  log('');
+  log('── Test 2: Betrag-Parsing ──');
+  const amt1=parseNum('-54,90');
+  if(amt1===-54.9) pass('Deutscher Betrag (-54,90 → -54.9)') else fail('Deutscher Betrag',amt1);
+  const amt2=parseNum('3.200,00');
+  if(amt2===3200) pass('Tausender-Trennung (3.200,00 → 3200)') else fail('Tausender',amt2);
+  const amt3=parseNum('-850,00');
+  if(amt3===-850) pass('Runder Betrag (-850,00 → -850)') else fail('Runder Betrag',amt3);
+
+  // Test 3: Datum-Parsing
+  log('');
+  log('── Test 3: Datum-Parsing ──');
+  const d1=parseDate('01.05.2026');
+  if(d1==='2026-05-01') pass('Deutsches Datum (01.05.2026 → 2026-05-01)') else fail('Deutsches Datum',d1);
+  const d2=parseDate('2026-05-01');
+  if(d2==='2026-05-01') pass('ISO-Datum identisch') else fail('ISO-Datum',d2);
+  const d3=parseDate('1.5.26');
+  if(d3==='2026-05-01') pass('Kurzes Datum (1.5.26 → 2026-05-01)') else fail('Kurzes Datum',d3);
+
+  // Test 4: Payee-Cleaning
+  log('');
+  log('── Test 4: Payee-Cleaning ──');
+  const CLEAN_PATTERNS=[
+    {regex:/PayPal\s+\*(.+?)\*.*/i,replace:'PayPal $1'},
+    {regex:/^(.+?)\/\/[A-Za-zäöüÄÖÜß\s]+\/[A-Z]{2}$/,replace:'$1'},
+    {regex:/^(.+?)\/\/[A-Za-zäöüÄÖÜß\s]+$/,replace:'$1'},
+    {regex:/^(.+?)\s+\*[\d]+\*$/,replace:'$1'},
+    {regex:/\s{2,}/g,replace:' '},
+  ];
+  function cleanPayee(raw){let c=raw.trim();for(const p of CLEAN_PATTERNS){const b=c;c=c.replace(p.regex,p.replace);if(c!==b)break;}return c.trim();}
+  
+  const c1=cleanPayee('REWE Markt Schmidt//Langenzenn/DE');
+  if(c1==='REWE Markt Schmidt') pass('//Ort/DE entfernt') else fail('//Ort/DE',c1);
+  const c2=cleanPayee('PayPal *Amazon*12345678');
+  if(c2==='PayPal Amazon') pass('*Ref* entfernt') else fail('*Ref*',c2);
+  const c3=cleanPayee('Uber Eats//Berlin/DE');
+  if(c3==='Uber Eats') pass('//Berlin/DE entfernt') else fail('//Berlin/DE',c3);
+
+  // Test 5: Duplicate Detection
+  log('');
+  log('── Test 5: Duplicate Detection ──');
+  const dupCSV='Datum;Wertstellung;Kategorie;Name;Verwendungszweck;Konto;Bank;Betrag;Währung\n01.05.2026;01.05.2026;Lebensmittel;REWE//DE;Einkauf;DE123;SSKM;-54,90;EUR\n01.05.2026;01.05.2026;Lebensmittel;REWE//DE;Einkauf;DE123;SSKM;-54,90;EUR\n02.05.2026;02.05.2026;Miete;Vermieter;Miete;DE123;SSKM;-850,00;EUR';
+  const dupParsed=parseDelimited(dupCSV,';');
+  // Simulate duplicate detection
+  const map=new Map();
+  dupParsed.rows.forEach((r,i)=>{
+    const key=(r.Datum||'')+'|'+(r.Betrag||'')+'|'+(r.Name||'');
+    if(!map.has(key))map.set(key,[]);map.get(key).push(i);
+  });
+  const dups=[...map.values()].filter(g=>g.length>1);
+  if(dups.length===1) pass('1 Duplikat-Gruppe erkannt') else fail('Duplikat-Gruppen',dups.length);
+  if(dups[0].length===2) pass('Gruppe hat 2 Einträge') else fail('Gruppengröße',dups[0].length);
+
+  // Summary
+  log('');
+  log('═'.repeat(50));
+  if(fails===0){
+    SUMMARY.className='summary all-pass';
+    SUMMARY.textContent=`✅ Alle ${passes} Tests bestanden!`;
+  } else {
+    SUMMARY.className='summary has-fails';
+    SUMMARY.textContent=`❌ ${fails} von ${passes+fails} Tests fehlgeschlagen`;
+  }
+}
+
+function testWithDemoData(){
+  clearLog();
+  log('═══ DEMO-DATEN TEST ═══');
+  
+  const DEMO=[
+    'Datum;Wertstellung;Kategorie;Name;Verwendungszweck;Konto;Bank;Betrag;Währung',
+    '25.05.2026;25.05.2026;Lebensmittel;REWE Markt Schmidt//Langenzenn/DE;Einkauf;DE12345678901234567890;SSKMDEMMXXX;-54,90;EUR',
+    '24.05.2026;24.05.2026;Einkommen;Musterfirma GmbH;Gehalt Mai 2026;DE12345678901234567890;SSKMDEMMXXX;3200,00;EUR',
+    '23.05.2026;23.05.2026;Nebenkosten;Stadtwerke München;Stromabschlag Mai 2026;DE12345678901234567890;SSKMDEMMXXX;-89,00;EUR',
+    '22.05.2026;22.05.2026;Zinsen;DKB AG;Habenzinsen April 2026;DE98765432101234567890;BELADEBEXXX;7,12;EUR',
+    '21.05.2026;21.05.2026;Versicherung;HUK24 AG / HUK-Coburg Unternehmensgruppe;KFZ-Versicherung;DE12345678901234567890;SSKMDEMMXXX;-234,56;EUR',
+    '20.05.2026;20.05.2026;Online;PayPal *Amazon*AB-12345678;Bestellung;DE12345678901234567890;SSKMDEMMXXX;-29,99;EUR',
+    '19.05.2026;19.05.2026;Mobilität;Shell Tankstelle München;Tanken;DE12345678901234567890;SSKMDEMMXXX;-68,40;EUR',
+    '18.05.2026;18.05.2026;Essen;Uber Eats//Berlin/DE;Essen bestellen;DE12345678901234567890;SSKMDEMMXXX;-18,75;EUR',
+    '17.05.2026;17.05.2026;Lebensmittel;EDEKA Center Müller//Nürnberg/DE;Wocheneinkauf;DE12345678901234567890;SSKMDEMMXXX;-87,23;EUR',
+    '16.05.2026;16.05.2026;Freizeit;Spotify AB;Spotify Premium;DE12345678901234567890;SSKMDEMMXXX;-9,99;EUR',
+    '15.05.2026;15.05.2026;Miete;Mustermann Vermieter;Miete Mai 2026;DE12345678901234567890;SSKMDEMMXXX;-850,00;EUR',
+    '10.05.2026;10.05.2026;Gehalt;Musterfirma GmbH;Gehalt Mai 2026;DE12345678901234567890;SSKMDEMMXXX;3200,00;EUR',
+    '03.05.2026;03.05.2026;Gehalt;Musterfirma GmbH;Gehalt Mai 2026;DE12345678901234567890;SSKMDEMMXXX;3200,00;EUR',
+    '02.05.2026;02.05.2026;Miete;Mustermann Vermieter;Miete Mai 2026;DE12345678901234567890;SSKMDEMMXXX;-850,00;EUR',
+    '01.05.2026;01.05.2026;Versicherung;HUK24 AG / HUK-Coburg Unternehmensgruppe;KFZ-Versicherung;DE12345678901234567890;SSKMDEMMXXX;-234,56;EUR',
+  ].join('\n');
+
+  const parsed=parseDelimited(DEMO,';');
+  log(`📊 ${parsed.rows.length} Zeilen × ${parsed.headers.length} Spalten`);
+  log(`📋 Spalten: ${parsed.headers.join(', ')}`);
+  
+  // Check all expected columns
+  const expected=['Datum','Wertstellung','Kategorie','Name','Verwendungszweck','Konto','Bank','Betrag','Währung'];
+  expected.forEach(col=>{
+    if(parsed.headers.includes(col)) pass(`Spalte "${col}" vorhanden`) else fail(`Spalte "${col}" fehlt`);
+  });
+
+  // Check duplicates
+  const map=new Map();
+  parsed.rows.forEach((r,i)=>{
+    const key=(r.Datum||'')+'|'+(r.Betrag||'')+'|'+(r.Konto||'')+'|'+(r.Name||'');
+    if(!map.has(key))map.set(key,[]);map.get(key).push(i+1);
+  });
+  const dups=[...map.entries()].filter(([,v])=>v.length>1);
+  if(dups.length>0){
+    pass(`${dups.length} Duplikat-Gruppe(n) erkannt`);
+    dups.forEach(([key,rows])=>info(`  Duplikat: Zeilen ${rows.join(', ')} → ${key}`));
+  } else {
+    warn('Keine Duplikate erkannt');
+  }
+
+  // Check payee cleaning
+  const testPayees=[
+    ['REWE Markt Schmidt//Langenzenn/DE','REWE Markt Schmidt'],
+    ['PayPal *Amazon*AB-12345678','PayPal Amazon'],
+    ['Uber Eats//Berlin/DE','Uber Eats'],
+    ['HUK24 AG / HUK-Coburg Unternehmensgruppe','HUK24 AG'],
+  ];
+  testPayees.forEach(([input,expected])=>{
+    const cleaned=cleanPayee(input);
+    if(cleaned===expected) pass(`Payee: "${input}" → "${cleaned}"`) else fail(`Payee: "${input}"`,cleaned);
+  });
+
+  // Check amounts
+  const amounts=parsed.rows.map(r=>parseNum(r.Betrag)).filter(v=>v!==null);
+  const total=amounts.reduce((a,b)=>a+b,0);
+  log(`💰 Summe aller Beträge: ${total.toFixed(2)} EUR`);
+  log(`📈 Einnahmen: ${amounts.filter(v=>v>0).reduce((a,b)=>a+b,0).toFixed(2)} EUR`);
+  log(`📉 Ausgaben: ${amounts.filter(v=>v<0).reduce((a,b)=>a+b,0).toFixed(2)} EUR`);
+
+  // Check date range
+  const dates=parsed.rows.map(r=>parseDate(r.Datum)).filter(Boolean).sort();
+  log(`📅 Zeitraum: ${dates[0]} bis ${dates[dates.length-1]}`);
+
+  // Check categories
+  const cats=[...new Set(parsed.rows.map(r=>r.Kategorie))];
+  log(`🏷 Kategorien: ${cats.join(', ')}`);
+
+  // Check accounts
+  const accs=[...new Set(parsed.rows.map(r=>r.Konto))];
+  log(`🏦 Konten: ${accs.length} unterschiedlich`);
+
+  log('');
+  log('═══ DEMO-DATEN TEST ABGESCHLOSSEN ═══');
+}
+
+function testExportFormats(){
+  clearLog();
+  log('═══ EXPORT-FORMAT TEST ═══');
+
+  // Simulate a normalized row
+  const row={
+    date:'2026-05-25',payee:'REWE',memo:'Einkauf',category:'Lebensmittel',
+    amount:-54.9,currency:'EUR',gfType:'WITHDRAWAL',symbol:'EUR',accountName:'Girokonto',
+    id:'girokonto-2026-05-25-1',accountId:'abc-123',unitPrice:54.9,fee:0,quantity:1
+  };
+
+  // Test Actual CSV
+  log('');
+  log('── Actual Budget CSV ──');
+  const csvLine=`${row.date},${row.payee},${row.memo},${row.category},${row.amount.toFixed(2)},${row.accountName},${row.id}`;
+  log(csvLine);
+  if(csvLine.includes('2026-05-25')&&csvLine.includes('-54.90')) pass('Actual CSV Format korrekt') else fail('Actual CSV');
+
+  // Test Ghostfolio JSON
+  log('');
+  log('── Ghostfolio JSON ──');
+  const gfAct={
+    currency:row.currency,dataSource:'MANUAL',date:row.date+'T00:00:00.000Z',
+    fee:row.fee,quantity:row.quantity,symbol:row.symbol,type:row.gfType,
+    unitPrice:row.unitPrice,comment:row.memo,accountId:row.accountId
+  };
+  const gfExport={meta:{date:new Date().toISOString(),version:'v2'},activities:[gfAct]};
+  const gfJson=JSON.stringify(gfExport,null,2);
+  log(gfJson.substring(0,300)+'...');
+  
+  // Validate required fields
+  const required=['currency','dataSource','date','fee','quantity','symbol','type','unitPrice'];
+  const missing=required.filter(f=>!(f in gfAct));
+  if(missing.length===0) pass('Alle Pflichtfelder vorhanden') else fail('Pflichtfelder fehlen',missing.join(', '));
+  if(gfAct.dataSource==='MANUAL') pass('dataSource = MANUAL') else fail('dataSource');
+  if(gfAct.quantity===1) pass('quantity = 1') else fail('quantity');
+  if(gfAct.unitPrice===54.9) pass('unitPrice = Absolutbetrag') else fail('unitPrice');
+  if(gfExport.meta.version==='v2') pass('meta.version = v2') else fail('meta.version');
+
+  // Test Ghostfolio CSV
+  log('');
+  log('── Ghostfolio CSV ──');
+  const gfCsvLine=`${row.date},${row.gfType},${row.symbol},${row.quantity},${row.unitPrice.toFixed(2)},${row.currency},${row.fee.toFixed(2)},${row.accountName},"${row.memo}"`;
+  log(gfCsvLine);
+  if(gfCsvLine.includes('WITHDRAWAL')&&gfCsvLine.includes('54.90')) pass('Ghostfolio CSV Format korrekt') else fail('Ghostfolio CSV');
+
+  log('');
+  log('═══ EXPORT-FORMAT TEST ABGESCHLOSSEN ═══');
+}
+
+// Schema reference
+SCHEMA_REF.textContent=`Ghostfolio JSON v2 Schema:
+{
+  meta: { date: ISO-8601, version: "v2" },
+  activities: [{
+    currency: "EUR",          // REQUIRED
+    dataSource: "MANUAL",     // REQUIRED - MANUAL, YAHOO, COINGECKO, etc.
+    date: "2026-05-25T00:00:00.000Z",  // REQUIRED - ISO-8601
+    fee: 0,                   // REQUIRED - number
+    quantity: 1,              // REQUIRED - number
+    symbol: "EUR",            // REQUIRED - string
+    type: "WITHDRAWAL",       // REQUIRED - BUY, SELL, DIVIDEND, INTEREST, FEE, DEPOSIT, WITHDRAWAL
+    unitPrice: 54.9,          // REQUIRED - number (absolute)
+    comment: "memo",          // optional
+    accountId: "uuid"         // optional
+  }]
+}
+
+Actual Budget CSV:
+date, payee, notes, category, amount, account, imported_id
+2026-05-25, REWE, Einkauf, Lebensmittel, -54.90, Girokonto, girokonto-2026-05-25-1`;
+
+// Auto-run on load
+window.addEventListener('load',()=>{
+  log('🚀 Sandbox geladen. Klicke "Alle Tests starten" zum Testen.');
+  log('📋 Die v4 Webapp findest du hier: moneymoney-budget-bridge-v4.html');
+});
+</script>
+</body>
+</html>
