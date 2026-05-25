@@ -615,13 +615,17 @@ function loadText(text,label){
   S.delimiter=detectDelimiter(text);
   const{headers,rows}=parseDelimited(text,S.delimiter);
   S.headers=headers;S.rawRows=rows;
+  console.log('[loadText] headers:',headers.length,'rows:',rows.length);
   buildMappingGrid(headers);
   el.headerHint.textContent=`${headers.length} Spalten · Delimiter: ${S.delimiter==='\t'?'Tab':S.delimiter}`;
   el.fileInfo.textContent=label||`${rows.length} Zeilen geladen`;
   el.dupPanel.style.display='';el.payeePanel.style.display='';el.catPanel.style.display='';el.accPanel.style.display='';
   detectDuplicates();renderDuplicates();
-  applyPreset();renderPayeeMapping();renderCatMapping();renderAccMapping();
+  applyPreset();
+  console.log('[loadText] after applyPreset, date mapping:',getMap().date);
+  renderPayeeMapping();renderCatMapping();renderAccMapping();
   renderAll();
+  console.log('[loadText] after renderAll, normalized:',S.normalized.length);
 }
 el.dropZone.addEventListener('click',()=>el.file.click());
 el.dropZone.addEventListener('dragover',e=>{e.preventDefault();el.dropZone.style.borderColor='var(--primary)';});
