@@ -5,247 +5,76 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MoneyMoney → Actual Budget & Ghostfolio</title>
 <style>
-  :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface2: #242836;
-    --border: #2e3348;
-    --text: #e2e4f0;
-    --text-dim: #7b8199;
-    --accent: #6c5ce7;
-    --accent2: #00b894;
-    --accent3: #fdcb6e;
-    --danger: #e74c3c;
-    --success: #00b894;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-    padding: 2rem;
-  }
-  h1 { font-size: 1.6rem; margin-bottom: 0.3rem; }
-  h2 { font-size: 1.15rem; margin-bottom: 0.8rem; color: var(--accent); }
-  h3 { font-size: 1rem; margin-bottom: 0.5rem; color: var(--accent2); }
-  .subtitle { color: var(--text-dim); margin-bottom: 2rem; font-size: 0.9rem; }
-  .container { max-width: 1100px; margin: 0 auto; }
-
-  .drop-zone {
-    border: 2px dashed var(--border);
-    border-radius: 12px;
-    padding: 3rem 2rem;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.2s;
-    background: var(--surface);
-    margin-bottom: 1.5rem;
-  }
-  .drop-zone:hover, .drop-zone.drag-over {
-    border-color: var(--accent);
-    background: var(--surface2);
-  }
-  .drop-zone .icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
-  .drop-zone p { color: var(--text-dim); }
-  .drop-zone .formats { font-size: 0.8rem; margin-top: 0.5rem; color: var(--text-dim); }
-  #fileInput { display: none; }
-
-  .account-section {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-  }
-  .account-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
-  .account-chip {
-    padding: 0.4rem 0.8rem;
-    border-radius: 20px;
-    border: 1px solid var(--border);
-    background: var(--surface2);
-    cursor: pointer;
-    font-size: 0.85rem;
-    transition: all 0.15s;
-    user-select: none;
-  }
-  .account-chip:hover { border-color: var(--accent); }
-  .account-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .account-chip .count { opacity: 0.6; font-size: 0.75rem; }
-
-  .mapping-section {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-  }
-  .mapping-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    margin-bottom: 0.8rem;
-    align-items: center;
-  }
-  .mapping-row label { font-size: 0.85rem; color: var(--text-dim); }
-  .mapping-row select, .mapping-row input[type="text"], .mapping-row input[type="url"], .mapping-row input[type="password"] {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 0.5rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
-    width: 100%;
-  }
-
-  .preview-section {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-    overflow-x: auto;
-  }
-  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-  th { background: var(--surface2); padding: 0.5rem 0.6rem; text-align: left; font-weight: 600; color: var(--accent); white-space: nowrap; }
-  td { padding: 0.4rem 0.6rem; border-top: 1px solid var(--border); white-space: nowrap; }
-  tr:hover td { background: var(--surface2); }
-  .amount-pos { color: var(--success); }
-  .amount-neg { color: var(--danger); }
-
-  .export-section {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-  }
-  .export-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.5rem;
-    text-align: center;
-  }
-  .export-card .icon { font-size: 2rem; margin-bottom: 0.5rem; }
-  .export-card h3 { margin-bottom: 0.3rem; }
-  .export-card p { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 1rem; }
-  .btn {
-    display: inline-block;
-    padding: 0.6rem 1.5rem;
-    border: none;
-    border-radius: 8px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
-    text-decoration: none;
-  }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: #5a4bd6; }
-  .btn-secondary { background: var(--accent2); color: #fff; }
-  .btn-secondary:hover { background: #00a381; }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-group { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
-
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 0.8rem;
-    margin-bottom: 1.5rem;
-  }
-  .stat-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1rem;
-    text-align: center;
-  }
-  .stat-card .value { font-size: 1.3rem; font-weight: 700; }
-  .stat-card .label { font-size: 0.75rem; color: var(--text-dim); margin-top: 0.2rem; }
-
-  .cat-map-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr auto;
-    gap: 0.5rem;
-    margin-bottom: 0.4rem;
-    align-items: center;
-  }
-  .cat-map-row input, .cat-map-row select {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 0.4rem;
-    border-radius: 6px;
-    font-size: 0.8rem;
-    width: 100%;
-  }
-  .cat-map-row .btn-sm {
-    padding: 0.3rem 0.6rem;
-    font-size: 0.75rem;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .cat-map-row .btn-sm:hover { border-color: var(--danger); color: var(--danger); }
-
-  .hidden { display: none !important; }
-
-  .info-box {
-    background: var(--surface2);
-    border-left: 3px solid var(--accent3);
-    padding: 0.8rem 1rem;
-    border-radius: 0 8px 8px 0;
-    margin-bottom: 1rem;
-    font-size: 0.85rem;
-    color: var(--text-dim);
-  }
-
-  .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
-  .tab {
-    padding: 0.5rem 1rem;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--surface2);
-    cursor: pointer;
-    font-size: 0.85rem;
-    transition: all 0.15s;
-  }
-  .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .tab-content { display: none; }
-  .tab-content.active { display: block; }
-
-  .log-box {
-    margin-top: 0.8rem;
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    max-height: 200px;
-    overflow-y: auto;
-    background: var(--surface2);
-    border-radius: 6px;
-    padding: 0.5rem;
-    display: none;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    line-height: 1.5;
-  }
-  .log-box .log-ok { color: var(--success); }
-  .log-box .log-err { color: var(--danger); }
-  .log-box .log-info { color: var(--accent3); }
-
-  @media (max-width: 700px) {
-    .export-section { grid-template-columns: 1fr; }
-    .mapping-row { grid-template-columns: 1fr; }
-    body { padding: 1rem; }
-  }
+  :root{--bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--border:#2e3348;--text:#e2e4f0;--text-dim:#7b8199;--accent:#6c5ce7;--accent2:#00b894;--accent3:#fdcb6e;--danger:#e74c3c;--success:#00b894}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:2rem}
+  h1{font-size:1.6rem;margin-bottom:.3rem}
+  h2{font-size:1.15rem;margin-bottom:.8rem;color:var(--accent)}
+  h3{font-size:1rem;margin-bottom:.5rem;color:var(--accent2)}
+  .subtitle{color:var(--text-dim);margin-bottom:2rem;font-size:.9rem}
+  .container{max-width:1100px;margin:0 auto}
+  .drop-zone{border:2px dashed var(--border);border-radius:12px;padding:3rem 2rem;text-align:center;cursor:pointer;transition:all .2s;background:var(--surface);margin-bottom:1.5rem}
+  .drop-zone:hover,.drop-zone.drag-over{border-color:var(--accent);background:var(--surface2)}
+  .drop-zone .icon{font-size:2.5rem;margin-bottom:.5rem}
+  .drop-zone p{color:var(--text-dim)}
+  .drop-zone .formats{font-size:.8rem;margin-top:.5rem;color:var(--text-dim)}
+  #fileInput{display:none}
+  .account-section{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1.5rem}
+  .account-list{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem}
+  .account-chip{padding:.4rem .8rem;border-radius:20px;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:.85rem;transition:all .15s;user-select:none}
+  .account-chip:hover{border-color:var(--accent)}
+  .account-chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .account-chip .count{opacity:.6;font-size:.75rem}
+  .mapping-section{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1.5rem}
+  .mapping-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:.8rem;align-items:center}
+  .mapping-row label{font-size:.85rem;color:var(--text-dim)}
+  .mapping-row select,.mapping-row input[type="text"],.mapping-row input[type="url"],.mapping-row input[type="password"]{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:.5rem;border-radius:8px;font-size:.85rem;width:100%}
+  .preview-section{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:.8rem}
+  th{background:var(--surface2);padding:.5rem .6rem;text-align:left;font-weight:600;color:var(--accent);white-space:nowrap}
+  td{padding:.4rem .6rem;border-top:1px solid var(--border);white-space:nowrap}
+  tr:hover td{background:var(--surface2)}
+  .amount-pos{color:var(--success)}
+  .amount-neg{color:var(--danger)}
+  .export-section{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem}
+  .export-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;text-align:center}
+  .export-card .icon{font-size:2rem;margin-bottom:.5rem}
+  .export-card h3{margin-bottom:.3rem}
+  .export-card p{font-size:.8rem;color:var(--text-dim);margin-bottom:1rem}
+  .btn{display:inline-block;padding:.6rem 1.5rem;border:none;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;transition:all .15s;text-decoration:none}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-primary:hover{background:#5a4bd6}
+  .btn-secondary{background:var(--accent2);color:#fff}
+  .btn-secondary:hover{background:#00a381}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn-group{display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.8rem;margin-bottom:1.5rem}
+  .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;text-align:center}
+  .stat-card .value{font-size:1.3rem;font-weight:700}
+  .stat-card .label{font-size:.75rem;color:var(--text-dim);margin-top:.2rem}
+  .cat-map-row{display:grid;grid-template-columns:1fr 1fr auto;gap:.5rem;margin-bottom:.4rem;align-items:center}
+  .cat-map-row input,.cat-map-row select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:.4rem;border-radius:6px;font-size:.8rem;width:100%}
+  .cat-map-row .btn-sm{padding:.3rem .6rem;font-size:.75rem;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer}
+  .cat-map-row .btn-sm:hover{border-color:var(--danger);color:var(--danger)}
+  .hidden{display:none!important}
+  .info-box{background:var(--surface2);border-left:3px solid var(--accent3);padding:.8rem 1rem;border-radius:0 8px 8px 0;margin-bottom:1rem;font-size:.85rem;color:var(--text-dim)}
+  .tabs{display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap}
+  .tab{padding:.5rem 1rem;border-radius:8px;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:.85rem;transition:all .15s}
+  .tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .tab-content{display:none}
+  .tab-content.active{display:block}
+  .log-box{margin-top:.8rem;font-size:.75rem;color:var(--text-dim);max-height:200px;overflow-y:auto;background:var(--surface2);border-radius:6px;padding:.5rem;display:none;font-family:'SF Mono','Fira Code',monospace;line-height:1.5}
+  .log-box .log-ok{color:var(--success)}
+  .log-box .log-err{color:var(--danger)}
+  .log-box .log-info{color:var(--accent3)}
+  @media(max-width:700px){.export-section{grid-template-columns:1fr}.mapping-row{grid-template-columns:1fr}body{padding:1rem}}
 </style>
 </head>
 <body>
 <div class="container">
   <h1>💰 MoneyMoney → Budget Export</h1>
-  <p class="subtitle">Lade deine MoneyMoney CSV-Datei hoch und exportiere für Actual Budget (CSV) und Ghostfolio (API oder CSV).</p>
+  <p class="subtitle">Lade deine MoneyMoney CSV-Datei hoch und exportiere für Actual Budget und Ghostfolio.</p>
 
-  <!-- Drop Zone -->
   <div class="drop-zone" id="dropZone">
     <div class="icon">📄</div>
     <p><strong>CSV-Datei hierher ziehen</strong> oder klicken zum Auswählen</p>
@@ -253,57 +82,68 @@
     <input type="file" id="fileInput" accept=".csv,.txt">
   </div>
 
-  <!-- Info Box -->
   <div class="info-box" id="infoBox">
-    💡 <strong>Tipp:</strong> In MoneyMoney: <code>Datei → Exportieren → Als CSV</code>. Wähle "Alle Buchungen" und Tabulator als Trennzeichen. Die Datei wird lokal verarbeitet — nichts wird an einen Server gesendet.
+    💡 <strong>Tipp:</strong> In MoneyMoney: <code>Datei → Exportieren → Als CSV</code>. Wähle "Alle Buchungen" und Tabulator als Trennzeichen.
   </div>
 
-  <!-- Account Selection -->
   <div class="account-section hidden" id="accountSection">
     <h2>📂 Konto auswählen</h2>
     <div class="account-list" id="accountList"></div>
     <div class="stats" id="stats"></div>
   </div>
 
-  <!-- Category Mapping -->
   <div class="mapping-section hidden" id="catSection">
     <h2>🏷️ Kategorie-Zuordnung (optional)</h2>
-    <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.8rem;">
-      Ordne MoneyMoney-Kategorien Budget-Kategorien zu. Leere = Kategorie wird übernommen wie sie ist.
-    </p>
+    <p style="font-size:.8rem;color:var(--text-dim);margin-bottom:.8rem;">Ordne MoneyMoney-Kategorien Budget-Kategorien zu.</p>
     <div id="catMapping"></div>
   </div>
 
-  <!-- Preview -->
   <div class="preview-section hidden" id="previewSection">
     <h2>👁️ Vorschau <span id="txCount" style="color:var(--text-dim);font-weight:400;"></span></h2>
-    <div style="overflow-x:auto;">
-      <table id="previewTable">
-        <thead><tr id="previewHead"></tr></thead>
-        <tbody id="previewBody"></tbody>
-      </table>
-    </div>
+    <div style="overflow-x:auto;"><table id="previewTable"><thead><tr id="previewHead"></tr></thead><tbody id="previewBody"></tbody></table></div>
   </div>
 
-  <!-- Export -->
   <div class="export-section hidden" id="exportSection">
     <div class="export-card">
       <div class="icon">📊</div>
       <h3>Actual Budget</h3>
-      <p>CSV-Import für Actual Budget (Date, Amount, Payee, Category, Notes)</p>
-      <button class="btn btn-primary" id="btnActual" disabled>⬇ CSV herunterladen</button>
-      <p style="font-size:0.7rem;color:var(--text-dim);margin-top:0.5rem;">
-        💡 In Actual Budget: <code>File → Import → CSV</code>
-      </p>
+      <p>Direktimport via Python-Script (empfohlen) oder CSV</p>
+      <div class="btn-group">
+        <button class="btn btn-primary" id="btnActualApi" disabled>🐍 Python Script</button>
+        <button class="btn btn-primary" id="btnActualCsv" disabled style="opacity:0.7;">⬇ CSV</button>
+      </div>
     </div>
     <div class="export-card">
       <div class="icon">👻</div>
       <h3>Ghostfolio</h3>
-      <p>Direktimport über API (empfohlen) oder CSV-Export für manuellen Upload</p>
+      <p>Direktimport über API (empfohlen) oder CSV</p>
       <div class="btn-group">
         <button class="btn btn-secondary" id="btnGfApi" disabled>🚀 API Import</button>
         <button class="btn btn-secondary" id="btnGfCsv" disabled style="opacity:0.7;">⬇ CSV</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Actual Budget Settings -->
+  <div class="mapping-section hidden" id="actualSection">
+    <h2>📊 Actual Budget Einstellungen</h2>
+    <div class="tabs">
+      <div class="tab active" data-tab="actual-api">API-Verbindung</div>
+      <div class="tab" data-tab="actual-mapping">Konto-Zuordnung</div>
+    </div>
+    <div class="tab-content active" id="actual-api">
+      <div class="mapping-row"><label>Actual Budget URL</label><input type="url" id="actualUrl" placeholder="http://localhost:5006"></div>
+      <div class="mapping-row"><label>Passwort</label><input type="password" id="actualPassword" placeholder="Dein Actual Budget Passwort"></div>
+      <div class="mapping-row"><label>Budget-Name</label><input type="text" id="actualBudgetName" placeholder="MoneyMoney Import"></div>
+      <div style="display:flex;gap:.5rem;margin-top:.5rem;align-items:center;flex-wrap:wrap;">
+        <button class="btn btn-sm" id="btnActualTest" style="padding:.4rem 1rem;font-size:.8rem;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer;">🔌 Verbindung testen</button>
+        <span id="actualConnStatus" style="font-size:.8rem;color:var(--text-dim);"></span>
+      </div>
+      <div id="actualImportLog" class="log-box"></div>
+    </div>
+    <div class="tab-content" id="actual-mapping">
+      <p style="font-size:.8rem;color:var(--text-dim);margin-bottom:.8rem;">Ordne MoneyMoney-Konten Actual Budget Konten zu.</p>
+      <div id="actualAccountMapping"></div>
     </div>
   </div>
 
@@ -315,557 +155,343 @@
       <div class="tab" data-tab="gf-mapping">Symbol-Zuordnung</div>
       <div class="tab" data-tab="gf-options">Optionen</div>
     </div>
-
-    <!-- API Connection Tab -->
     <div class="tab-content active" id="gf-api">
-      <div class="mapping-row">
-        <label>Ghostfolio URL</label>
-        <input type="url" id="gfUrl" placeholder="https://ghostfolio.example.com">
-      </div>
-      <div class="mapping-row">
-        <label>Access Token</label>
-        <input type="password" id="gfToken" placeholder="Dein Ghostfolio Access Token">
-      </div>
-      <div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center;flex-wrap:wrap;">
-        <button class="btn btn-sm" id="btnGfTest" style="padding:0.4rem 1rem;font-size:0.8rem;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer;">
-          🔌 Verbindung testen
-        </button>
-        <button class="btn btn-sm" id="btnGfDryRun" style="padding:0.4rem 1rem;font-size:0.8rem;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer;">
-          🧪 Dry Run
-        </button>
-        <span id="gfConnStatus" style="font-size:0.8rem;color:var(--text-dim);"></span>
+      <div class="mapping-row"><label>Ghostfolio URL</label><input type="url" id="gfUrl" placeholder="https://ghostfolio.example.com"></div>
+      <div class="mapping-row"><label>Access Token</label><input type="password" id="gfToken" placeholder="Dein Ghostfolio Access Token"></div>
+      <div style="display:flex;gap:.5rem;margin-top:.5rem;align-items:center;flex-wrap:wrap;">
+        <button class="btn btn-sm" id="btnGfTest" style="padding:.4rem 1rem;font-size:.8rem;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer;">🔌 Verbindung testen</button>
+        <button class="btn btn-sm" id="btnGfDryRun" style="padding:.4rem 1rem;font-size:.8rem;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer;">🧪 Dry Run</button>
+        <span id="gfConnStatus" style="font-size:.8rem;color:var(--text-dim);"></span>
       </div>
       <div id="gfImportLog" class="log-box"></div>
     </div>
-
-    <!-- Symbol Mapping Tab -->
     <div class="tab-content" id="gf-mapping">
-      <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.8rem;">
-        Ordne Zahlungsbetreff/Beschreibung Ghostfolio-Symbolen zu (z.B. AAPL, VTI, BTC-USD).
-        Nur relevant für Investment-/Depot-Transaktionen.
-      </p>
+      <p style="font-size:.8rem;color:var(--text-dim);margin-bottom:.8rem;">Ordne Zahlungsbetreff/Beschreibung Ghostfolio-Symbolen zu.</p>
       <div id="gfSymbolMapping"></div>
-      <button class="btn btn-sm" id="addGfRow" style="margin-top:0.5rem;padding:0.3rem 0.8rem;font-size:0.8rem;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer;">
-        + Regel hinzufügen
-      </button>
+      <button class="btn btn-sm" id="addGfRow" style="margin-top:.5rem;padding:.3rem .8rem;font-size:.8rem;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer;">+ Regel hinzufügen</button>
     </div>
-
-    <!-- Options Tab -->
     <div class="tab-content" id="gf-options">
-      <div class="mapping-row">
-        <label>Standard-Symbol (Fallback)</label>
-        <input type="text" id="gfDefaultSymbol" placeholder="z.B. CASH">
-      </div>
-      <div class="mapping-row">
-        <label>Standard-Währung</label>
-        <input type="text" id="gfCurrency" value="EUR">
-      </div>
-      <div class="mapping-row">
-        <label>Transaktionstyp für Einnahmen</label>
-        <select id="gfIncomeType">
-          <option value="BUY">BUY (Kauf)</option>
-          <option value="DIVIDEND">DIVIDEND (Dividende)</option>
-          <option value="INTEREST">INTEREST (Zinsen)</option>
-        </select>
-      </div>
-      <div class="mapping-row">
-        <label>Transaktionstyp für Ausgaben</label>
-        <select id="gfExpenseType">
-          <option value="SELL">SELL (Verkauf)</option>
-          <option value="FEE">FEE (Gebühr)</option>
-        </select>
-      </div>
-      <div class="mapping-row">
-        <label>Data Source</label>
-        <select id="gfDataSource">
-          <option value="MANUAL">MANUAL</option>
-        </select>
-      </div>
+      <div class="mapping-row"><label>Standard-Symbol</label><input type="text" id="gfDefaultSymbol" placeholder="CASH"></div>
+      <div class="mapping-row"><label>Standard-Währung</label><input type="text" id="gfCurrency" value="EUR"></div>
+      <div class="mapping-row"><label>Typ für Einnahmen</label><select id="gfIncomeType"><option value="BUY">BUY (Kauf)</option><option value="DIVIDEND">DIVIDEND (Dividende)</option><option value="INTEREST">INTEREST (Zinsen)</option></select></div>
+      <div class="mapping-row"><label>Typ für Ausgaben</label><select id="gfExpenseType"><option value="SELL">SELL (Verkauf)</option><option value="FEE">FEE (Gebühr)</option></select></div>
+      <div class="mapping-row"><label>Data Source</label><select id="gfDataSource"><option value="MANUAL">MANUAL</option></select></div>
     </div>
   </div>
 </div>
 
 <script>
-// ============================================================
-// STATE
-// ============================================================
-let rawData = [];
-let accounts = new Set();
-let categories = new Set();
-let selectedAccount = null;
-let catMap = {};
-let gfSymbolRules = [];
-let gfAuthToken = null;
+let rawData=[],accounts=new Set(),categories=new Set(),selectedAccount=null,catMap={},gfSymbolRules=[],actualAccountMap={};
 
-// ============================================================
-// MONEYMONEY CSV PARSER
-// ============================================================
-function parseMoneyMoneyCSV(text) {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) return [];
-
-  const headerLine = lines[0];
-  let delimiter = '\t';
-  if (headerLine.includes(';') && !headerLine.includes('\t')) {
-    delimiter = ';';
+function parseMoneyMoneyCSV(text){
+  const lines=text.split(/\r?\n/).filter(l=>l.trim());
+  if(lines.length<2)return[];
+  const hdr=lines[0];
+  let delim='\t';
+  if(hdr.includes(';')&&!hdr.includes('\t'))delim=';';
+  const headers=splitLine(hdr,delim);
+  const rows=[];
+  for(let i=1;i<lines.length;i++){
+    const cols=splitLine(lines[i],delim);
+    if(cols.length<7)continue;
+    const account=cols[0]||'',dateRaw=cols[1]||cols[2]||'',payee=cols[3]||cols[11]||cols[12]||'',amountStr=cols[6]||'',currency=cols[7]||'EUR',category=cols[8]||'',subcategory=cols[9]||'',notes=cols[10]||'';
+    let amount=0;
+    if(amountStr){const c=amountStr.replace(/[^\d,.\-]/g,'').replace(/\./g,'').replace(',','.');amount=parseFloat(c)||0;}
+    let date=dateRaw;
+    const m=dateRaw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if(m)date=m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+    rows.push({account,date,payee,amount,currency,category,subcategory,notes});
+    if(account)accounts.add(account);
+    if(category)categories.add(category);
   }
-
-  const headers = splitLine(headerLine, delimiter);
-  const rows = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const cols = splitLine(lines[i], delimiter);
-    if (cols.length < 7) continue;
-
-    const row = {};
-    headers.forEach((h, idx) => {
-      row[h.trim()] = (cols[idx] || '').trim();
-    });
-
-    const account = cols[0] || '';
-    const dateRaw = cols[1] || cols[2] || '';
-    const payee = cols[3] || cols[11] || cols[12] || '';
-    const amountStr = cols[6] || '';
-    const currency = cols[7] || 'EUR';
-    const category = cols[8] || '';
-    const subcategory = cols[9] || '';
-    const notes = cols[10] || '';
-
-    let amount = 0;
-    if (amountStr) {
-      const cleaned = amountStr
-        .replace(/[^\d,.\-]/g, '')
-        .replace(/\./g, '')
-        .replace(',', '.');
-      amount = parseFloat(cleaned) || 0;
-    }
-
-    let date = dateRaw;
-    const dateMatch = dateRaw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-    if (dateMatch) {
-      date = `${dateMatch[3]}-${dateMatch[2].padStart(2,'0')}-${dateMatch[1].padStart(2,'0')}`;
-    }
-
-    rows.push({ account, date, payee, amount, currency, category, subcategory, notes, _raw: cols });
-    if (account) accounts.add(account);
-    if (category) categories.add(category);
-  }
-
   return rows;
 }
 
-function splitLine(line, delimiter) {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') { inQuotes = !inQuotes; }
-    else if (ch === delimiter && !inQuotes) { result.push(current); current = ''; }
-    else { current += ch; }
+function splitLine(line,delim){
+  const r=[];let cur='',q=false;
+  for(let i=0;i<line.length;i++){
+    const c=line[i];
+    if(c==='"')q=!q;
+    else if(c===delim&&!q){r.push(cur);cur='';}
+    else cur+=c;
   }
-  result.push(current);
-  return result;
+  r.push(cur);return r;
 }
 
-// ============================================================
-// FILE HANDLING
-// ============================================================
-const dropZone = document.getElementById('dropZone');
-const fileInput = document.getElementById('fileInput');
+const dropZone=document.getElementById('dropZone'),fileInput=document.getElementById('fileInput');
+dropZone.addEventListener('click',()=>fileInput.click());
+dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.add('drag-over');});
+dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop',e=>{e.preventDefault();dropZone.classList.remove('drag-over');if(e.dataTransfer.files.length)handleFile(e.dataTransfer.files[0]);});
+fileInput.addEventListener('change',e=>{if(e.target.files.length)handleFile(e.target.files[0]);});
 
-dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', e => {
-  e.preventDefault(); dropZone.classList.remove('drag-over');
-  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
-});
-fileInput.addEventListener('change', e => {
-  if (e.target.files.length) handleFile(e.target.files[0]);
-});
-
-function handleFile(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    rawData = parseMoneyMoneyCSV(e.target.result);
-    if (!rawData.length) {
-      alert('Keine Buchungen gefunden. Bitte prüfe das Format (Tab-getrenntes CSV von MoneyMoney).');
-      return;
-    }
-    selectedAccount = null;
-    renderAccountSelection();
-    renderCategoryMapping();
-    renderGfSymbolMapping();
+function handleFile(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    rawData=parseMoneyMoneyCSV(e.target.result);
+    if(!rawData.length){alert('Keine Buchungen gefunden.');return;}
+    selectedAccount=null;
+    renderAccountSelection();renderCategoryMapping();renderGfSymbolMapping();renderActualAccountMapping();
     document.getElementById('accountSection').classList.remove('hidden');
     document.getElementById('catSection').classList.remove('hidden');
     document.getElementById('gfSection').classList.remove('hidden');
+    document.getElementById('actualSection').classList.remove('hidden');
     document.getElementById('exportSection').classList.remove('hidden');
     document.getElementById('infoBox').classList.add('hidden');
-    dropZone.querySelector('p').innerHTML = `<strong>✅ ${file.name}</strong> — ${rawData.length} Buchungen geladen`;
+    dropZone.querySelector('p').innerHTML='<strong>✅ '+file.name+'</strong> — '+rawData.length+' Buchungen geladen';
   };
-  reader.readAsText(file, 'UTF-8');
+  reader.readAsText(file,'UTF-8');
 }
 
-// ============================================================
-// ACCOUNT SELECTION
-// ============================================================
-function renderAccountSelection() {
-  const list = document.getElementById('accountList');
-  list.innerHTML = '';
-
-  const allChip = document.createElement('div');
-  allChip.className = 'account-chip' + (selectedAccount === null ? ' active' : '');
-  allChip.innerHTML = `Alle Konten <span class="count">(${rawData.length})</span>`;
-  allChip.onclick = () => { selectedAccount = null; renderAccountSelection(); renderPreview(); };
-  list.appendChild(allChip);
-
-  accounts.forEach(acc => {
-    const count = rawData.filter(r => r.account === acc).length;
-    const chip = document.createElement('div');
-    chip.className = 'account-chip' + (selectedAccount === acc ? ' active' : '');
-    chip.innerHTML = `${acc} <span class="count">(${count})</span>`;
-    chip.onclick = () => { selectedAccount = acc; renderAccountSelection(); renderPreview(); };
+function renderAccountSelection(){
+  const list=document.getElementById('accountList');list.innerHTML='';
+  const all=document.createElement('div');
+  all.className='account-chip'+(selectedAccount===null?' active':'');
+  all.innerHTML='Alle Konten <span class="count">('+rawData.length+')</span>';
+  all.onclick=()=>{selectedAccount=null;renderAccountSelection();renderPreview();};
+  list.appendChild(all);
+  accounts.forEach(acc=>{
+    const count=rawData.filter(r=>r.account===acc).length;
+    const chip=document.createElement('div');
+    chip.className='account-chip'+(selectedAccount===acc?' active':'');
+    chip.innerHTML=acc+' <span class="count">('+count+')</span>';
+    chip.onclick=()=>{selectedAccount=acc;renderAccountSelection();renderPreview();};
     list.appendChild(chip);
   });
-
-  renderStats();
-  renderPreview();
+  renderStats();renderPreview();
 }
 
-function getFilteredData() {
-  if (!selectedAccount) return rawData;
-  return rawData.filter(r => r.account === selectedAccount);
+function getFilteredData(){return!selectedAccount?rawData:rawData.filter(r=>r.account===selectedAccount);}
+
+function renderStats(){
+  const data=getFilteredData(),inc=data.filter(r=>r.amount>0).reduce((s,r)=>s+r.amount,0),exp=data.filter(r=>r.amount<0).reduce((s,r)=>s+r.amount,0),dates=data.map(r=>r.date).filter(Boolean).sort();
+  document.getElementById('stats').innerHTML='<div class="stat-card"><div class="value">'+data.length+'</div><div class="label">Buchungen</div></div><div class="stat-card"><div class="value amount-pos">+'+inc.toFixed(2)+' €</div><div class="label">Einnahmen</div></div><div class="stat-card"><div class="value amount-neg">'+exp.toFixed(2)+' €</div><div class="label">Ausgaben</div></div><div class="stat-card"><div class="value">'+(inc+exp).toFixed(2)+' €</div><div class="label">Saldo</div></div><div class="stat-card"><div class="value">'+(dates[0]||'—')+'</div><div class="label">Erste Buchung</div></div><div class="stat-card"><div class="value">'+(dates[dates.length-1]||'—')+'</div><div class="label">Letzte Buchung</div></div>';
 }
 
-function renderStats() {
-  const data = getFilteredData();
-  const income = data.filter(r => r.amount > 0).reduce((s, r) => s + r.amount, 0);
-  const expenses = data.filter(r => r.amount < 0).reduce((s, r) => s + r.amount, 0);
-  const dates = data.map(r => r.date).filter(Boolean).sort();
-
-  document.getElementById('stats').innerHTML = `
-    <div class="stat-card"><div class="value">${data.length}</div><div class="label">Buchungen</div></div>
-    <div class="stat-card"><div class="value amount-pos">+${income.toFixed(2)} €</div><div class="label">Einnahmen</div></div>
-    <div class="stat-card"><div class="value amount-neg">${expenses.toFixed(2)} €</div><div class="label">Ausgaben</div></div>
-    <div class="stat-card"><div class="value">${(income + expenses).toFixed(2)} €</div><div class="label">Saldo</div></div>
-    <div class="stat-card"><div class="value">${dates[0] || '—'}</div><div class="label">Erste Buchung</div></div>
-    <div class="stat-card"><div class="value">${dates[dates.length-1] || '—'}</div><div class="label">Letzte Buchung</div></div>
-  `;
+function renderCategoryMapping(){
+  const c=document.getElementById('catMapping');c.innerHTML='';
+  categories.forEach(cat=>{
+    const row=document.createElement('div');row.className='cat-map-row';
+    row.innerHTML='<input type="text" value="'+eh(cat)+'" readonly><input type="text" placeholder="Budget-Kategorie" value="'+eh(catMap[cat]||'')+'" data-cat="'+eh(cat)+'"><button class="btn-sm" data-cat="'+eh(cat)+'" title="Zurücksetzen">✕</button>';
+    c.appendChild(row);
+  });
+  c.querySelectorAll('input[placeholder]').forEach(i=>{i.addEventListener('input',e=>{catMap[e.target.dataset.cat]=e.target.value;});});
+  c.querySelectorAll('button[data-cat]').forEach(b=>{b.addEventListener('click',e=>{delete catMap[e.target.dataset.cat];renderCategoryMapping();});});
 }
 
-// ============================================================
-// CATEGORY MAPPING
-// ============================================================
-function renderCategoryMapping() {
-  const container = document.getElementById('catMapping');
-  container.innerHTML = '';
-
-  categories.forEach(cat => {
-    const row = document.createElement('div');
-    row.className = 'cat-map-row';
-    row.innerHTML = `
-      <input type="text" value="${escapeHtml(cat)}" readonly title="MoneyMoney Kategorie">
-      <input type="text" placeholder="Budget-Kategorie (leer = beibehalten)" value="${escapeHtml(catMap[cat] || '')}" data-cat="${escapeHtml(cat)}">
-      <button class="btn-sm" data-cat="${escapeHtml(cat)}" title="Zurücksetzen">✕</button>
-    `;
-    container.appendChild(row);
+function renderActualAccountMapping(){
+  const c=document.getElementById('actualAccountMapping');c.innerHTML='';
+  accounts.forEach(acc=>{if(!actualAccountMap[acc])actualAccountMap[acc]=acc;});
+  accounts.forEach(acc=>{
+    const row=document.createElement('div');row.className='cat-map-row';
+    row.innerHTML='<input type="text" value="'+eh(acc)+'" readonly><input type="text" placeholder="Actual Konto" value="'+eh(actualAccountMap[acc]||'')+'" data-acc="'+eh(acc)+'" class="actual-acct-input">';
+    c.appendChild(row);
   });
-
-  container.querySelectorAll('input[placeholder]').forEach(input => {
-    input.addEventListener('input', e => { catMap[e.target.dataset.cat] = e.target.value; });
-  });
-  container.querySelectorAll('button[data-cat]').forEach(btn => {
-    btn.addEventListener('click', e => {
-      delete catMap[e.target.dataset.cat];
-      renderCategoryMapping();
-    });
-  });
+  c.querySelectorAll('.actual-acct-input').forEach(i=>{i.addEventListener('input',e=>{actualAccountMap[e.target.dataset.acc]=e.target.value||e.target.dataset.acc;});});
 }
 
-// ============================================================
-// GHOSTFOLIO SYMBOL MAPPING
-// ============================================================
-function renderGfSymbolMapping() {
-  const container = document.getElementById('gfSymbolMapping');
-  container.innerHTML = '';
-
-  gfSymbolRules.forEach((rule, idx) => {
-    const row = document.createElement('div');
-    row.className = 'cat-map-row';
-    row.innerHTML = `
-      <input type="text" placeholder="Suchbegriff (z.B. Amazon, Lohn)" value="${escapeHtml(rule.pattern || '')}" data-idx="${idx}" class="gf-pattern">
-      <input type="text" placeholder="Symbol (z.B. AMZN, SALARY)" value="${escapeHtml(rule.symbol || '')}" data-idx="${idx}" class="gf-symbol">
-      <button class="btn-sm" data-idx="${idx}">✕</button>
-    `;
-    container.appendChild(row);
+function renderGfSymbolMapping(){
+  const c=document.getElementById('gfSymbolMapping');c.innerHTML='';
+  gfSymbolRules.forEach((rule,idx)=>{
+    const row=document.createElement('div');row.className='cat-map-row';
+    row.innerHTML='<input type="text" placeholder="Suchbegriff" value="'+eh(rule.pattern||'')+'" data-idx="'+idx+'" class="gf-pattern"><input type="text" placeholder="Symbol" value="'+eh(rule.symbol||'')+'" data-idx="'+idx+'" class="gf-symbol"><button class="btn-sm" data-idx="'+idx+'">✕</button>';
+    c.appendChild(row);
   });
-
-  container.querySelectorAll('.gf-pattern').forEach(input => {
-    input.addEventListener('input', e => { gfSymbolRules[e.target.dataset.idx].pattern = e.target.value; });
-  });
-  container.querySelectorAll('.gf-symbol').forEach(input => {
-    input.addEventListener('input', e => { gfSymbolRules[e.target.dataset.idx].symbol = e.target.value; });
-  });
-  container.querySelectorAll('button[data-idx]').forEach(btn => {
-    btn.addEventListener('click', e => {
-      gfSymbolRules.splice(parseInt(e.target.dataset.idx), 1);
-      renderGfSymbolMapping();
-    });
-  });
+  c.querySelectorAll('.gf-pattern').forEach(i=>{i.addEventListener('input',e=>{gfSymbolRules[e.target.dataset.idx].pattern=e.target.value;});});
+  c.querySelectorAll('.gf-symbol').forEach(i=>{i.addEventListener('input',e=>{gfSymbolRules[e.target.dataset.idx].symbol=e.target.value;});});
+  c.querySelectorAll('button[data-idx]').forEach(b=>{b.addEventListener('click',e=>{gfSymbolRules.splice(parseInt(e.target.dataset.idx),1);renderGfSymbolMapping();});});
 }
+document.getElementById('addGfRow').addEventListener('click',()=>{gfSymbolRules.push({pattern:'',symbol:''});renderGfSymbolMapping();});
 
-document.getElementById('addGfRow').addEventListener('click', () => {
-  gfSymbolRules.push({ pattern: '', symbol: '' });
-  renderGfSymbolMapping();
-});
-
-// ============================================================
-// TABS
-// ============================================================
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById(tab.dataset.tab).classList.add('active');
+document.querySelectorAll('.tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    const p=tab.closest('.mapping-section');
+    p.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    p.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+    tab.classList.add('active');p.querySelector('#'+tab.dataset.tab).classList.add('active');
   });
 });
 
-// ============================================================
-// PREVIEW
-// ============================================================
-function renderPreview() {
-  const data = getFilteredData().slice(0, 100);
-  const thead = document.getElementById('previewHead');
-  const tbody = document.getElementById('previewBody');
-
-  thead.innerHTML = '<th>Datum</th><th>Betrag</th><th>Zahlungsbetreff</th><th>Kategorie</th><th>Konto</th>';
-  tbody.innerHTML = '';
-
-  data.forEach(row => {
-    const tr = document.createElement('tr');
-    const amtClass = row.amount >= 0 ? 'amount-pos' : 'amount-neg';
-    tr.innerHTML = `
-      <td>${escapeHtml(row.date)}</td>
-      <td class="${amtClass}">${row.amount >= 0 ? '+' : ''}${row.amount.toFixed(2)} ${escapeHtml(row.currency)}</td>
-      <td>${escapeHtml(row.payee)}</td>
-      <td>${escapeHtml(row.category)}${row.subcategory ? ' → ' + escapeHtml(row.subcategory) : ''}</td>
-      <td>${escapeHtml(row.account)}</td>
-    `;
-    tbody.appendChild(tr);
+function renderPreview(){
+  const data=getFilteredData().slice(0,100);
+  const th=document.getElementById('previewHead'),tb=document.getElementById('previewBody');
+  th.innerHTML='<th>Datum</th><th>Betrag</th><th>Zahlungsbetreff</th><th>Kategorie</th><th>Konto</th>';tb.innerHTML='';
+  data.forEach(row=>{
+    const tr=document.createElement('tr'),ac=row.amount>=0?'amount-pos':'amount-neg';
+    tr.innerHTML='<td>'+eh(row.date)+'</td><td class="'+ac+'">'+(row.amount>=0?'+':'')+row.amount.toFixed(2)+' '+eh(row.currency)+'</td><td>'+eh(row.payee)+'</td><td>'+eh(row.category)+(row.subcategory?' → '+eh(row.subcategory):'')+'</td><td>'+eh(row.account)+'</td>';
+    tb.appendChild(tr);
   });
-
-  document.getElementById('txCount').textContent = `(zeige ${data.length} von ${getFilteredData().length})`;
+  document.getElementById('txCount').textContent='(zeige '+data.length+' von '+getFilteredData().length+')';
   document.getElementById('previewSection').classList.remove('hidden');
-  document.getElementById('btnActual').disabled = false;
-  document.getElementById('btnGfApi').disabled = false;
-  document.getElementById('btnGfCsv').disabled = false;
+  document.getElementById('btnActualApi').disabled=false;
+  document.getElementById('btnActualCsv').disabled=false;
+  document.getElementById('btnGfApi').disabled=false;
+  document.getElementById('btnGfCsv').disabled=false;
 }
 
-// ============================================================
-// ACTUAL BUDGET EXPORT
-// ============================================================
-document.getElementById('btnActual').addEventListener('click', () => {
-  const data = getFilteredData();
-  const rows = ['date,amount,payee,category,notes'];
-
-  data.forEach(r => {
-    const date = r.date || '';
-    const amount = r.amount.toFixed(2);
-    const payee = csvEscape(r.payee);
-    const cat = csvEscape(catMap[r.category] || r.category || '');
-    const notes = csvEscape(r.notes || '');
-    rows.push(`${date},${amount},${payee},${cat},${notes}`);
-  });
-
-  downloadCSV(rows.join('\n'), 'actual-budget-import.csv');
+// ACTUAL CSV
+document.getElementById('btnActualCsv').addEventListener('click',()=>{
+  const data=getFilteredData(),rows=['date,amount,payee,category,notes'];
+  data.forEach(r=>{rows.push((r.date||'')+','+r.amount.toFixed(2)+','+csvEscape(r.payee)+','+csvEscape(catMap[r.category]||r.category||'')+','+csvEscape(r.notes||''));});
+  downloadBlob(rows.join('\n'),'actual-budget-import.csv','text/csv;charset=utf-8;');
 });
 
-// ============================================================
-// GHOSTFOLIO CSV EXPORT
-// ============================================================
-document.getElementById('btnGfCsv').addEventListener('click', () => {
-  const data = getFilteredData();
-  const defaultSymbol = document.getElementById('gfDefaultSymbol').value.trim() || 'CASH';
-  const currency = document.getElementById('gfCurrency').value.trim() || 'EUR';
-  const incomeType = document.getElementById('gfIncomeType').value;
-  const expenseType = document.getElementById('gfExpenseType').value;
-
-  const rows = ['Date,Type,Symbol,Quantity,Unit Price,Currency,Fee,Note'];
-
-  data.forEach(r => {
-    const date = r.date || '';
-    const absAmount = Math.abs(r.amount);
-
-    let symbol = defaultSymbol;
-    for (const rule of gfSymbolRules) {
-      if (rule.pattern && rule.symbol) {
-        const haystack = `${r.payee} ${r.notes} ${r.category}`.toLowerCase();
-        if (haystack.includes(rule.pattern.toLowerCase())) { symbol = rule.symbol; break; }
-      }
-    }
-
-    let type, qty, unitPrice, fee;
-    if (r.amount > 0) {
-      type = incomeType; qty = 1; unitPrice = absAmount.toFixed(2); fee = '0';
-    } else {
-      type = expenseType; qty = 1; unitPrice = absAmount.toFixed(2); fee = '0';
-    }
-
-    const note = csvEscape(`${r.payee}${r.notes ? ' — ' + r.notes : ''}${r.category ? ' [' + r.category + ']' : ''}`);
-    rows.push(`${date},${type},${symbol},${qty},${unitPrice},${currency},${fee},${note}`);
+// GHOSTFOLIO CSV
+document.getElementById('btnGfCsv').addEventListener('click',()=>{
+  const data=getFilteredData(),defSym=document.getElementById('gfDefaultSymbol').value.trim()||'CASH',cur=document.getElementById('gfCurrency').value.trim()||'EUR',incT=document.getElementById('gfIncomeType').value,expT=document.getElementById('gfExpenseType').value;
+  const rows=['Date,Type,Symbol,Quantity,Unit Price,Currency,Fee,Note'];
+  data.forEach(r=>{
+    let sym=defSym;
+    for(const rule of gfSymbolRules){if(rule.pattern&&rule.symbol){const h=(r.payee+' '+r.notes+' '+r.category).toLowerCase();if(h.includes(rule.pattern.toLowerCase())){sym=rule.symbol;break;}}}
+    const t=r.amount>0?incT:expT,a=Math.abs(r.amount),note=csvEscape(r.payee+(r.notes?' — '+r.notes:'')+(r.category?' ['+r.category+']':''));
+    rows.push(r.date+','+t+','+sym+',1,'+a.toFixed(2)+','+cur+',0,'+note);
   });
-
-  downloadCSV(rows.join('\n'), 'ghostfolio-import.csv');
+  downloadBlob(rows.join('\n'),'ghostfolio-import.csv','text/csv;charset=utf-8;');
 });
 
-// ============================================================
-// GHOSTFOLIO API IMPORT
-// ============================================================
-function gfLog(msg, type) {
-  const log = document.getElementById('gfImportLog');
-  log.style.display = 'block';
-  const cls = type === 'ok' ? 'log-ok' : type === 'err' ? 'log-err' : 'log-info';
-  const time = new Date().toLocaleTimeString('de-DE');
-  log.innerHTML += `<div class="${cls}">[${time}] ${escapeHtml(msg)}</div>`;
-  log.scrollTop = log.scrollHeight;
+// GHOSTFOLIO API
+function gfLog(msg,type){
+  const log=document.getElementById('gfImportLog');log.style.display='block';
+  const c=type==='ok'?'log-ok':type==='err'?'log-err':'log-info';
+  log.innerHTML+='<div class="'+c+'">['+new Date().toLocaleTimeString('de-DE')+'] '+eh(msg)+'</div>';
+  log.scrollTop=log.scrollHeight;
 }
 
-function gfClearLog() {
-  document.getElementById('gfImportLog').innerHTML = '';
-}
-
-async function gfApiRequest(method, path, body) {
-  const url = document.getElementById('gfUrl').value.trim().replace(/\/$/, '');
-  const token = document.getElementById('gfToken').value.trim();
-
-  if (!url) throw new Error('Bitte Ghostfolio URL eingeben');
-  if (!token) throw new Error('Bitte Access Token eingeben');
-
-  const resp = await fetch(`${url}/api/v1${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
-
-  const data = await resp.json();
-  if (!resp.ok) {
-    const msg = Array.isArray(data.message) ? data.message.join('; ') : (data.message || data.error || `HTTP ${resp.status}`);
-    throw new Error(msg);
-  }
+async function gfApiRequest(method,path,body){
+  const url=document.getElementById('gfUrl').value.trim().replace(/\/$/,''),token=document.getElementById('gfToken').value.trim();
+  if(!url)throw new Error('Bitte Ghostfolio URL eingeben');
+  if(!token)throw new Error('Bitte Access Token eingeben');
+  const resp=await fetch(url+'/api/v1'+path,{method,headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:body?JSON.stringify(body):undefined});
+  const data=await resp.json();
+  if(!resp.ok){const msg=Array.isArray(data.message)?data.message.join('; '):(data.message||data.error||'HTTP '+resp.status);throw new Error(msg);}
   return data;
 }
 
-document.getElementById('btnGfTest').addEventListener('click', async () => {
-  gfClearLog();
-  gfLog('Teste Verbindung...', 'info');
-  try {
-    const data = await gfApiRequest('GET', '/health');
-    gfLog('✅ Verbindung OK! Ghostfolio ist erreichbar.', 'ok');
-  } catch (err) {
-    gfLog(`❌ ${err.message}`, 'err');
-  }
+document.getElementById('btnGfTest').addEventListener('click',async()=>{
+  document.getElementById('gfImportLog').innerHTML='';gfLog('Teste Verbindung...','info');
+  try{await gfApiRequest('GET','/health');gfLog('✅ Verbindung OK!','ok');}catch(err){gfLog('❌ '+err.message,'err');}
 });
 
-document.getElementById('btnGfDryRun').addEventListener('click', async () => {
-  gfClearLog();
-  const data = getFilteredData();
-  if (!data.length) { gfLog('Keine Daten geladen.', 'err'); return; }
-
-  gfLog(`Dry Run: Bereite ${data.length} Buchungen vor...`, 'info');
-
-  try {
-    const activities = buildGfActivities(data);
-    const result = await gfApiRequest('POST', '/import?dryRun=true', { activities });
-    const count = result.activities ? result.activities.length : 0;
-    gfLog(`✅ Dry Run OK! ${count} Activities würden importiert werden.`, 'ok');
-  } catch (err) {
-    gfLog(`❌ ${err.message}`, 'err');
-  }
+document.getElementById('btnGfDryRun').addEventListener('click',async()=>{
+  document.getElementById('gfImportLog').innerHTML='';
+  const data=getFilteredData();if(!data.length){gfLog('Keine Daten.','err');return;}
+  gfLog('Dry Run: '+data.length+' Buchungen...','info');
+  try{const acts=buildGfActivities(data);const res=await gfApiRequest('POST','/import?dryRun=true',{activities:acts});gfLog('✅ Dry Run OK! '+(res.activities?res.activities.length:0)+' Activities.','ok');}catch(err){gfLog('❌ '+err.message,'err');}
 });
 
-document.getElementById('btnGfApi').addEventListener('click', async () => {
-  gfClearLog();
-  const data = getFilteredData();
-  if (!data.length) { gfLog('Keine Daten geladen.', 'err'); return; }
-
-  if (!confirm(`Wirklich ${data.length} Buchungen in Ghostfolio importieren?`)) return;
-
-  gfLog(`Importiere ${data.length} Buchungen...`, 'info');
-
-  try {
-    const activities = buildGfActivities(data);
-    const result = await gfApiRequest('POST', '/import', { activities });
-    const count = result.activities ? result.activities.length : 0;
-    gfLog(`✅ Import erfolgreich! ${count} Activities importiert.`, 'ok');
-  } catch (err) {
-    gfLog(`❌ ${err.message}`, 'err');
-  }
+document.getElementById('btnGfApi').addEventListener('click',async()=>{
+  document.getElementById('gfImportLog').innerHTML='';
+  const data=getFilteredData();if(!data.length){gfLog('Keine Daten.','err');return;}
+  if(!confirm('Wirklich '+data.length+' Buchungen in Ghostfolio importieren?'))return;
+  gfLog('Importiere '+data.length+' Buchungen...','info');
+  try{const acts=buildGfActivities(data);const res=await gfApiRequest('POST','/import',{activities:acts});gfLog('✅ Import erfolgreich! '+(res.activities?res.activities.length:0)+' Activities.','ok');}catch(err){gfLog('❌ '+err.message,'err');}
 });
 
-function buildGfActivities(data) {
-  const defaultSymbol = document.getElementById('gfDefaultSymbol').value.trim() || 'CASH';
-  const currency = document.getElementById('gfCurrency').value.trim() || 'EUR';
-  const incomeType = document.getElementById('gfIncomeType').value;
-  const expenseType = document.getElementById('gfExpenseType').value;
-  const dataSource = document.getElementById('gfDataSource').value;
-
-  return data.map(r => {
-    let symbol = defaultSymbol;
-    for (const rule of gfSymbolRules) {
-      if (rule.pattern && rule.symbol) {
-        const haystack = `${r.payee} ${r.notes} ${r.category}`.toLowerCase();
-        if (haystack.includes(rule.pattern.toLowerCase())) { symbol = rule.symbol; break; }
-      }
-    }
-
-    const isIncome = r.amount > 0;
-    const type = isIncome ? incomeType : expenseType;
-    const absAmount = Math.abs(r.amount);
-
-    return {
-      date: r.date ? `${r.date}T00:00:00.000Z` : new Date().toISOString(),
-      type: type,
-      symbol: symbol,
-      quantity: 1,
-      unitPrice: parseFloat(absAmount.toFixed(2)),
-      currency: r.currency || currency,
-      fee: 0,
-      dataSource: dataSource,
-      comment: `${r.payee}${r.notes ? ' — ' + r.notes : ''}${r.category ? ' [' + r.category + ']' : ''}`.trim()
-    };
+function buildGfActivities(data){
+  const defSym=document.getElementById('gfDefaultSymbol').value.trim()||'CASH',cur=document.getElementById('gfCurrency').value.trim()||'EUR',incT=document.getElementById('gfIncomeType').value,expT=document.getElementById('gfExpenseType').value,ds=document.getElementById('gfDataSource').value;
+  return data.map(r=>{
+    let sym=defSym;
+    for(const rule of gfSymbolRules){if(rule.pattern&&rule.symbol){const h=(r.payee+' '+r.notes+' '+r.category).toLowerCase();if(h.includes(rule.pattern.toLowerCase())){sym=rule.symbol;break;}}}
+    const inc=r.amount>0;
+    return{date:r.date?r.date+'T00:00:00.000Z':new Date().toISOString(),type:inc?incT:expT,symbol:sym,quantity:1,unitPrice:parseFloat(Math.abs(r.amount).toFixed(2)),currency:r.currency||cur,fee:0,dataSource:ds,comment:(r.payee+(r.notes?' — '+r.notes:'')+(r.category?' ['+r.category+']':'')).trim()};
   });
 }
 
-// ============================================================
-// HELPERS
-// ============================================================
-function csvEscape(str) {
-  if (!str) return '';
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-    return '"' + str.replace(/"/g, '""') + '"';
+// ACTUAL BUDGET API
+function actualLog(msg,type){
+  const log=document.getElementById('actualImportLog');log.style.display='block';
+  const c=type==='ok'?'log-ok':type==='err'?'log-err':'log-info';
+  log.innerHTML+='<div class="'+c+'">['+new Date().toLocaleTimeString('de-DE')+'] '+eh(msg)+'</div>';
+  log.scrollTop=log.scrollHeight;
+}
+
+document.getElementById('btnActualTest').addEventListener('click',async()=>{
+  document.getElementById('actualImportLog').innerHTML='';
+  const url=document.getElementById('actualUrl').value.trim().replace(/\/$/,''),pw=document.getElementById('actualPassword').value.trim();
+  if(!url){actualLog('Bitte URL eingeben.','err');return;}
+  if(!pw){actualLog('Bitte Passwort eingeben.','err');return;}
+  actualLog('Teste Verbindung...','info');
+  try{
+    const resp=await fetch(url+'/account/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+    const data=await resp.json();
+    if(data.status==='ok'&&data.data&&data.data.token)actualLog('✅ Verbindung OK!','ok');
+    else actualLog('❌ Login fehlgeschlagen: '+(data.reason||'Unbekannter Fehler'),'err');
+  }catch(err){actualLog('❌ '+err.message,'err');}
+});
+
+document.getElementById('btnActualApi').addEventListener('click',async()=>{
+  document.getElementById('actualImportLog').innerHTML='';
+  const data=getFilteredData();if(!data.length){actualLog('Keine Daten.','err');return;}
+  const url=document.getElementById('actualUrl').value.trim().replace(/\/$/,''),pw=document.getElementById('actualPassword').value.trim(),bn=document.getElementById('actualBudgetName').value.trim()||'MoneyMoney Import';
+  if(!url){actualLog('Bitte URL eingeben.','err');return;}
+  if(!pw){actualLog('Bitte Passwort eingeben.','err');return;}
+  if(!confirm('Wirklich '+data.length+' Buchungen nach Actual Budget importieren?\n\nBudget: '+bn+'\nURL: '+url))return;
+  actualLog('Generiere Python-Import-Script...','info');
+  const py=generateActualPythonScript(data,url,pw,bn);
+  downloadBlob(py,'actual_import.py','text/x-python');
+  actualLog('✅ Python-Script heruntergeladen: actual_import.py','ok');
+  actualLog('Ausführen: pip install actualpy && python3 actual_import.py','info');
+});
+
+function escPy(s){return(s||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\n/g,'\\n');}
+
+function generateActualPythonScript(data,url,password,budgetName){
+  const rows=[];
+  for(const r of data){
+    const aa=actualAccountMap[r.account]||r.account,ac=catMap[r.category]||r.category||'',ac2=Math.round(r.amount*100),dt=r.date||new Date().toISOString().split('T')[0],pt=dt.split('-'),mo=parseInt(pt[1])||1,dy=parseInt(pt[2])||1;
+    rows.push('    # '+r.payee+' | '+r.category+' | '+r.account);
+    rows.push('    create_transaction(s, date(2026, '+mo+', '+dy+'), "'+escPy(aa)+'", "'+escPy(r.payee)+'", "'+escPy(ac)+'", '+ac2+'),');
   }
-  return str;
+  const rowsPy=rows.join('\n');
+  const uac=[...new Set(data.map(r=>actualAccountMap[r.account]||r.account))];
+  const acPy=uac.map(a=>'    create_account(s, "'+escPy(a)+'"),').join('\n');
+  const uc=[...new Set(data.map(r=>catMap[r.category]||r.category).filter(Boolean))];
+  let catPy;
+  if(uc.length>0)catPy=uc.map(c=>'    create_category(s, "'+escPy(c)+'", grp.id),').join('\n');
+  else catPy='    # Keine Kategorien';
+
+  return '#!/usr/bin/env python3\n'
+    +'"""\nActual Budget Import Script\nGeneriert von MoneyMoney Budget Export\nVoraussetzung: pip install actualpy\nAusfuehren: python3 actual_import.py\n"""\n'
+    +'\nimport warnings\nwarnings.filterwarnings("ignore")\n'
+    +'\nfrom actual import Actual\n'
+    +'from actual.queries import (\n    create_account, create_transaction, create_category, create_category_group,\n    get_accounts, get_transactions\n)\n'
+    +'from datetime import date\n'
+    +'\nURL = "'+escPy(url)+'"\n'
+    +'PASSWORD = "'+escPy(password)+'"\n'
+    +'BUDGET_NAME = "'+escPy(budgetName)+'"\n'
+    +'\ndef main():\n'
+    +'    print("Verbinde mit Actual Budget: " + URL)\n'
+    +'    with Actual(base_url=URL, password=PASSWORD) as actual:\n'
+    +'        actual.create_budget(BUDGET_NAME)\n'
+    +'        print("Budget: " + actual._file.name + " (" + actual._file.file_id + ")")\n'
+    +'        s = actual.session\n'
+    +'        print("Erstelle Konten...")\n'
+    +acPy+'\n'
+    +'        print("Erstelle Kategorien...")\n'
+    +'        grp = create_category_group(s, "MoneyMoney Import")\n'
+    +catPy+'\n'
+    +'        print("Erstelle Transaktionen...")\n'
+    +rowsPy+'\n'
+    +'        actual.commit()\n'
+    +'        print("\\nImport abgeschlossen!")\n'
+    +'        accounts = get_accounts(s)\n'
+    +'        print("\\nKonten (" + str(len(accounts)) + "):")\n'
+    +'        for a in accounts:\n'
+    +'            print("  - " + a.name + ": " + str(a.balance / 100))\n'
+    +'        tx = get_transactions(s)\n'
+    +'        print("\\nTransaktionen (" + str(len(tx)) + "):")\n'
+    +'        for t in tx[:10]:\n'
+    +'            print("  - " + str(t.date) + " " + str(t.amount / 100) + " " + str(t.notes))\n'
+    +'        if len(tx) > 10:\n'
+    +'            print("  ... und " + str(len(tx) - 10) + " weitere")\n'
+    +'\nif __name__ == "__main__":\n    main()\n';
 }
 
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str || '';
-  return div.innerHTML;
-}
-
-function downloadCSV(content, filename) {
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+// HELPERS
+function csvEscape(s){if(!s)return'';if(s.includes(',')||s.includes('"')||s.includes('\n'))return'"'+s.replace(/"/g,'""')+'"';return s;}
+function eh(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
+function downloadBlob(content,filename,mimeType){
+  const blob=new Blob([content],{type:mimeType});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=filename;a.click();URL.revokeObjectURL(u);
 }
 </script>
 </body>
