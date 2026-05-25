@@ -308,16 +308,19 @@ function suggestShortName(c){
 // ── DUPLICATES ──
 function detectDuplicates(){
   const map=new Map();
-  const gV=(r,k)=>{const m=getMap();return m[k]?(r[m[k]]??''):'';};
-  S.rawRows.forEach((r,i)=>{
-    const date=gV(r,'date')||gV(r,'valueDate')||'';
-    const amt=parseNum(gV(r,'amount'));
-    const payee=gV(r,'payee')||'';
-    const iban=(gV(r,'IBAN')||gV(r,'Empfänger IBAN')||'').replace(/\s/g,'');
-    // ALL of: date + amount + payee + iban must match (date is critical!)
-    const key=date+'|'+(amt??'')+'|'+payee+'|'+iban;
-    if(!map.has(key))map.set(key,[]);map.get(key).push(i);
-  });
+  S.rawRows.forEach((r,i=>{
+    // Try to find date/amount/payee directly from known column names
+    const date=r.Datum||r.date||r.Buchungsdatum||r['Wertstellung']||'';
+    const amtStr=r.Betrag||r.amount||r.Umsatz||'';
+    const amt=parseNum(amtStr);
+    const payee=r.Name||r.payee||r.Empfänger||r.Auftraggeber||'';
+    const iban=(r.IBAN||r['Empfänger IBAN']||r.Konto||'').replace(/\s/g,'');
+    // Only consider it a duplicate if ALL 4 match AND date is non-empty
+    if(!date||amt===null)return;
+    const key=date+'|'+amt+'|'+payee+'|'+iban;
+    if(!map.has(key))map.set(key,[]);
+    map.get(key).push(i);
+  }));
   S.dupGroups=[...map.values()].filter(g=>g.length>1).map(g=>({indices:g}));
 }
 function getDupFilteredRows(){
