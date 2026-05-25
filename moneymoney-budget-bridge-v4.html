@@ -621,6 +621,7 @@ function loadText(text,label){
   el.dupPanel.style.display='';el.payeePanel.style.display='';el.catPanel.style.display='';el.accPanel.style.display='';
   detectDuplicates();renderDuplicates();
   applyPreset();renderPayeeMapping();renderCatMapping();renderAccMapping();
+  renderAll();
 }
 el.dropZone.addEventListener('click',()=>el.file.click());
 el.dropZone.addEventListener('dragover',e=>{e.preventDefault();el.dropZone.style.borderColor='var(--primary)';});
