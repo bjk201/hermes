@@ -308,20 +308,17 @@ function suggestShortName(c){
 // ── DUPLICATES ──
 function detectDuplicates(){
   const map=new Map();
-  S.rawRows.forEach((r,i)=>{
-    // Try to find date/amount/payee directly from known column names
-    const date=r.Datum||r.date||r.Buchungsdatum||r['Wertstellung']||'';
-    const amtStr=r.Betrag||r.amount||r.Umsatz||'';
-    const amt=parseNum(amtStr);
-    const payee=r.Name||r.payee||r.Empfänger||r.Auftraggeber||'';
-    const iban=(r.IBAN||r['Empfänger IBAN']||r.Konto||'').replace(/\s/g,'');
-    // Only consider it a duplicate if ALL 4 match AND date is non-empty
+  S.rawRows.forEach(function(r,i){
+    var date=r.Datum||r.date||r.Buchungsdatum||r['Wertstellung']||'';
+    var amtStr=r.Betrag||r.amount||r.Umsatz||'';
+    var amt=parseNum(amtStr);
+    var payee=r.Name||r.payee||r.Empfänger||r.Auftraggeber||'';
     if(!date||amt===null)return;
-    const key=date+'|'+amt+'|'+payee+'|'+iban;
+    var key=date+'|'+amt+'|'+payee;
     if(!map.has(key))map.set(key,[]);
     map.get(key).push(i);
-  }));
-  S.dupGroups=[...map.values()].filter(g=>g.length>1).map(g=>({indices:g}));
+  });
+  S.dupGroups=[...map.values()].filter(function(g){return g.length>1;}).map(function(g){return {indices:g};});
 }
 function getDupFilteredRows(){
   if(!S.dupFilter||!S.dupGroups.length)return S.normalized;
