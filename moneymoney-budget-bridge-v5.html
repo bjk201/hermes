@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MoneyMoney Budget Bridge v5</title>
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
+  <style>
+    :root,[data-theme="light"]{
+      --text-xs:clamp(.75rem,.7rem + .25vw,.875rem);--text-sm:clamp(.875rem,.8rem + .35vw,1rem);
+      --text-base:clamp(1rem,.95rem + .25vw,1.125rem);--text-lg:clamp(1.125rem,1rem + .75vw,1.5rem);
+      --text-xl:clamp(1.5rem,1.2rem + 1.25vw,2.25rem);
+      --sp1:.25rem;--sp2:.5rem;--sp3:.75rem;--sp4:1rem;--sp5:1.25rem;--sp6:1.5rem;--sp8:2rem;--sp10:2.5rem;--sp12:3rem;--sp16:4rem;
+      --r-sm:.375rem;--r-md:.5rem;--r-lg:.75rem;--r-xl:1rem;--r-full:9999px;
+      --bg:#f7f6f2;--surface:#f9f8f5;--surface2:#fbfbf9;--surface-off:#f3f0ec;--surface-dyn:#e6e4df;
+      --border:#d4d1ca;--divider:#dcd9d5;--text:#28251d;--muted:#6d6a63;--faint:#9e9c96;
+      --primary:#01696f;--primary-h:#0c4e54;--primary-hl:#d9e6e3;
+      --success:#437a22;--error:#a12c7b;--warn:#964219;--warn-hl:#eeddd2;
+      --sh-sm:0 1px 2px rgba(22,21,18,.07);--sh-md:0 12px 32px rgba(22,21,18,.10);
+    }
+    [data-theme="dark"]{
+      --bg:#171614;--surface:#1c1b19;--surface2:#201f1d;--surface-off:#252320;--surface-dyn:#2d2c2a;
+      --border:#393836;--divider:#2a2927;--text:#e2e1de;--muted:#aea9a2;--faint:#7f7b74;
+      --primary:#4f98a3;--primary-h:#69abb4;--primary-hl:#243537;
+      --success:#7ebb56;--error:#d163a3;--warn:#d39162;--warn-hl:#3d2e20;
+      --sh-sm:0 1px 2px rgba(0,0,0,.25);--sh-md:0 12px 32px rgba(0,0,0,.35);
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{min-height:100vh;font-family:'Satoshi',Inter,sans-serif;font-size:var(--text-base);line-height:1.55;
+      background:radial-gradient(circle at top right,color-mix(in srgb,var(--primary) 8%,transparent),transparent 28%),var(--bg);
+      color:var(--text)}
+    button,input,select,textarea{font:inherit;color:inherit}
+    button{cursor:pointer;background:none;border:none}
+    .shell{width:min(1340px,calc(100% - 2rem));margin:0 auto;padding:var(--sp6) 0 var(--sp16)}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:var(--sp4);
+      margin-bottom:var(--sp8);padding:var(--sp4) var(--sp5);
+      background:color-mix(in srgb,var(--surface) 82%,transparent);
+      border:1px solid color-mix(in srgb,var(--text) 12%,transparent);
+      backdrop-filter:blur(12px);border-radius:var(--r-xl);box-shadow:var(--sh-sm);
+      position:sticky;top:var(--sp4);z-index:20}
+    .brand{display:flex;gap:var(--sp3);align-items:center}
+    .logo{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;flex:0 0 auto;
+      background:linear-gradient(135deg,var(--primary-hl),color-mix(in srgb,var(--surface) 40%,transparent));
+      color:var(--primary);border:1px solid color-mix(in srgb,var(--primary) 26%,transparent)}
+    .brand h1{font-size:var(--text-lg);line-height:1.1}
+    .brand p{color:var(--muted);font-size:var(--text-xs);margin-top:.15rem}
+    .badge{display:inline-flex;align-items:center;padding:.2rem .55rem;border-radius:var(--r-full);
+      background:color-mix(in srgb,var(--primary) 18%,transparent);color:var(--primary);
+      font-size:.7rem;font-weight:700;letter-spacing:.04em;margin-left:.5rem}
+    .toolbar{display:flex;gap:var(--sp2);flex-wrap:wrap}
+    .btn,.btn-sec,.btn-ghost{min-height:42px;border-radius:var(--r-full);padding:0 var(--sp4);
+      display:inline-flex;align-items:center;gap:.45rem;transition:.16s ease;border:1px solid transparent;
+      font-size:var(--text-sm)}
+    .btn{background:var(--primary);color:#fff}.btn:hover{background:var(--primary-h)}
+    .btn-sec{background:color-mix(in srgb,var(--surface-off) 88%,transparent);
+      border-color:color-mix(in srgb,var(--text) 12%,transparent)}
+    .btn-sec:hover,.btn-ghost:hover{background:var(--surface-dyn)}
+    .btn-ghost{color:var(--muted);border-color:color-mix(in srgb,var(--text) 10%,transparent)}
+    .btn-sm{min-height:34px;padding:0 var(--sp3);font-size:var(--text-xs)}
+    .btn-danger{background:var(--error);color:#fff;border-radius:var(--r-full);padding:0 var(--sp3);min-height:34px;
+      font-size:var(--text-xs);display:inline-flex;align-items:center;gap:.3rem}
+    .btn-danger:hover{opacity:.85}
+    .btn-test{background:color-mix(in srgb,var(--success) 20%,transparent);color:var(--success);
+      border:1px solid color-mix(in srgb,var(--success) 30%,transparent);border-radius:var(--r-full);
+      padding:0 var(--sp3);min-height:34px;font-size:var(--text-xs);display:inline-flex;
+      align-items:center;gap:.3rem;cursor:pointer;transition:.16s ease}
+    .btn-test:hover{background:color-mix(in srgb,var(--success) 30%,transparent)}
+    .btn-test:disabled{opacity:.5;cursor:wait}
+    main{display:grid;gap:var(--sp6)}
+    .panel{background:color-mix(in srgb,var(--surface) 86%,transparent);
+      border:1px solid color-mix(in srgb,var(--text) 11%,transparent);
+      border-radius:var(--r-xl);box-shadow:var(--sh-sm);padding:var(--sp5)}
+    .panel-title{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp4);margin-bottom:var(--sp5)}
+    .panel-title h2{font-size:var(--text-lg);line-height:1.2}
+    .panel-title p{margin-top:.3rem;color:var(--muted);font-size:var(--text-sm)}
+    .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp4)}
+    .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp4)}
+    .grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sp4)}
+    label{display:grid;gap:.35rem;font-size:var(--text-sm);color:var(--muted)}
+    label strong{color:var(--text)}
+    input,select,textarea{width:100%;min-height:42px;padding:.7rem .9rem;border-radius:var(--r-md);
+      border:1px solid color-mix(in srgb,var(--text) 12%,transparent);
+      background:color-mix(in srgb,var(--surface-off) 82%,transparent);color:var(--text);outline:none}
+    textarea{min-height:180px;resize:vertical;font-family:ui-monospace,monospace;font-size:.85rem}
+    input:focus,select:focus,textarea:focus{
+      border-color:color-mix(in srgb,var(--primary) 70%,white 30%);
+      box-shadow:0 0 0 4px color-mix(in srgb,var(--primary) 16%,transparent)}
+    .info-ic{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;
+      border-radius:50%;background:color-mix(in srgb,var(--primary) 18%,transparent);color:var(--primary);
+      font-size:.6rem;font-weight:700;cursor:help;flex-shrink:0;font-style:normal;
+      border:1px solid color-mix(in srgb,var(--primary) 30%,transparent);
+      position:relative;vertical-align:middle}
+    .info-ic .tip{position:absolute;z-index:100;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
+      background:var(--surface2);color:var(--text);border:1px solid color-mix(in srgb,var(--text) 15%,transparent);
+      border-radius:var(--r-md);padding:var(--sp2) var(--sp3);min-width:200px;max-width:320px;
+      font-size:var(--text-xs);font-weight:400;line-height:1.5;box-shadow:var(--sh-md);pointer-events:none;
+      opacity:0;transition:opacity .15s;white-space:normal;text-align:left;display:none}
+    .info-ic:hover .tip{opacity:1;display:block}
+    .req{color:var(--error);font-weight:700}
+    .dropzone{border:1.5px dashed color-mix(in srgb,var(--primary) 34%,var(--border));
+      background:linear-gradient(180deg,color-mix(in srgb,var(--primary) 8%,transparent),transparent);
+      border-radius:var(--r-xl);padding:var(--sp6);text-align:center;cursor:pointer;transition:.16s ease}
+    .dropzone:hover{border-color:var(--primary)}
+    .dropzone p{color:var(--muted);margin-top:var(--sp2);font-size:var(--text-sm)}
+    .callout{padding:var(--sp4);border-radius:var(--r-lg);
+      background:color-mix(in srgb,var(--primary) 9%,transparent);
+      border:1px solid color-mix(in srgb,var(--primary) 18%,transparent)}
+    .callout.warn{background:var(--warn-hl);border-color:color-mix(in srgb,var(--warn) 24%,transparent)}
+    .callout.ok{background:color-mix(in srgb,var(--success) 12%,transparent);border-color:color-mix(in srgb,var(--success) 24%,transparent)}
+    .callout p{font-size:var(--text-sm);margin-top:var(--sp2);color:var(--muted)}
+    .callout strong{color:var(--text)}
+    .mode-tabs{display:flex;gap:var(--sp2);padding:var(--sp2);
+      background:color-mix(in srgb,var(--surface-off) 70%,transparent);
+      border-radius:var(--r-xl);border:1px solid color-mix(in srgb,var(--text) 9%,transparent);
+      width:fit-content;margin-bottom:var(--sp5)}
+    .mode-tab{min-height:38px;padding:0 var(--sp4);border-radius:var(--r-lg);
+      font-size:var(--text-sm);font-weight:500;color:var(--muted);transition:.16s ease}
+    .mode-tab.active{background:var(--surface2);color:var(--text);
+      box-shadow:var(--sh-sm);border:1px solid color-mix(in srgb,var(--text) 10%,transparent)}
+    .mode-pane{display:none}.mode-pane.active{display:contents}
+    .out-tabs{display:flex;gap:var(--sp2);flex-wrap:wrap}
+    .out-tab{min-height:38px;padding:0 var(--sp4);border-radius:var(--r-full);
+      font-size:var(--text-sm);color:var(--muted);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);transition:.16s ease}
+    .out-tab.active{background:var(--primary);color:#fff;border-color:transparent}
+    .out-pane{display:none;margin-top:var(--sp5)}.out-pane.active{display:block}
+    .stat-row{display:flex;gap:var(--sp4);flex-wrap:wrap;margin-top:var(--sp4)}
+    .stat{padding:var(--sp3) var(--sp4);border-radius:var(--r-lg);
+      background:color-mix(in srgb,var(--surface-off) 80%,transparent);
+      border:1px solid color-mix(in srgb,var(--text) 9%,transparent);min-width:110px}
+    .stat strong{display:block;font-size:1.25rem;font-weight:700}
+    .stat span{font-size:var(--text-xs);color:var(--muted)}
+    .tbl-wrap{overflow:auto;border-radius:var(--r-lg);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);max-height:380px}
+    table{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+    th,td{padding:.75rem .85rem;border-bottom:1px solid var(--divider);text-align:left;vertical-align:top;white-space:nowrap}
+    th{position:sticky;top:0;background:var(--surface-off);z-index:1;font-weight:600}
+    td.wrap{white-space:normal;max-width:220px}
+    tbody tr:hover{background:color-mix(in srgb,var(--primary) 5%,transparent)}
+    .pill{display:inline-flex;align-items:center;padding:.2rem .55rem;border-radius:var(--r-full);
+      font-size:.7rem;font-weight:700;letter-spacing:.03em}
+    .pill-green{background:color-mix(in srgb,var(--success) 16%,transparent);color:var(--success)}
+    .pill-red{background:color-mix(in srgb,var(--error) 14%,transparent);color:var(--error)}
+    .pill-blue{background:color-mix(in srgb,var(--primary) 16%,transparent);color:var(--primary)}
+    .pill-warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+    .mono{font-family:ui-monospace,monospace;font-size:.83rem}
+    .status-line{font-size:var(--text-sm);color:var(--muted);min-height:1.4em;margin-top:var(--sp3)}
+    .status-ok{color:var(--success);font-weight:600}
+    .status-err{color:var(--error);font-weight:600}
+    .divider{border:none;border-top:1px solid var(--divider);margin:var(--sp5) 0}
+    .row{display:flex;align-items:center;gap:var(--sp3);flex-wrap:wrap}
+    .hidden{display:none!important}
+    .payee-map-table{overflow:auto;border-radius:var(--r-lg);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);max-height:320px}
+    .payee-map-table th:nth-child(1),.payee-map-table td:nth-child(1){max-width:260px;overflow:hidden;text-overflow:ellipsis}
+    .payee-map-table th:nth-child(2),.payee-map-table td:nth-child(2){max-width:180px}
+    .payee-map-table th:nth-child(3),.payee-map-table td:nth-child(3){width:40px;text-align:center}
+    .payee-suggestion{display:inline-flex;align-items:center;gap:.3rem;
+      background:color-mix(in srgb,var(--primary) 14%,transparent);
+      border:1px solid color-mix(in srgb,var(--primary) 28%,transparent);
+      border-radius:var(--r-full);padding:.15rem .55rem;
+      font-size:var(--text-xs);color:var(--primary);cursor:pointer;transition:.16s ease}
+    .payee-suggestion:hover{background:color-mix(in srgb,var(--primary) 24%,transparent)}
+    .payee-original{color:var(--faint);font-size:var(--text-xs);font-style:italic}
+    .payee-clean{color:var(--text);font-weight:500}
+    .payee-toolbar{display:flex;gap:var(--sp2);align-items:center;margin-bottom:var(--sp4);flex-wrap:wrap}
+    .payee-search{flex:1;min-width:200px}
+    .imported-tag{font-size:.65rem;background:color-mix(in srgb,var(--success) 18%,transparent);
+      color:var(--success);padding:.1rem .4rem;border-radius:var(--r-full);font-weight:600}
+    .dup-warning{padding:var(--sp4);border-radius:var(--r-lg);
+      background:color-mix(in srgb,var(--warn) 14%,transparent);
+      border:1px solid color-mix(in srgb,var(--warn) 28%,transparent);
+      margin-bottom:var(--sp4)}
+    .dup-warning strong{color:var(--warn)}
+    .dup-warning p{font-size:var(--text-sm);color:var(--muted);margin-top:var(--sp2)}
+    .dup-count{font-weight:700;color:var(--warn)}
+    .dup-table{max-height:200px;overflow:auto;border-radius:var(--r-lg);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);margin-top:var(--sp3)}
+    .dup-badge{display:inline-flex;align-items:center;padding:.15rem .45rem;border-radius:var(--r-full);
+      background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn);
+      font-size:.65rem;font-weight:700;letter-spacing:.03em}
+    .dup-row-highlight{background:color-mix(in srgb,var(--warn) 10%,transparent)!important}
+    .cat-map-wrap{overflow:auto;border-radius:var(--r-lg);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);max-height:320px}
+    .cat-map-wrap th:nth-child(1),.cat-map-wrap td:nth-child(1){max-width:200px}
+    .cat-map-wrap th:nth-child(2),.cat-map-wrap td:nth-child(2){max-width:180px}
+    .cat-map-wrap th:nth-child(3),.cat-map-wrap td:nth-child(3){width:40px;text-align:center}
+    .cat-bulk-bar{display:flex;gap:var(--sp2);align-items:center;margin-bottom:var(--sp3);flex-wrap:wrap}
+    .acc-map-wrap{overflow:auto;border-radius:var(--r-lg);
+      border:1px solid color-mix(in srgb,var(--text) 10%,transparent);max-height:260px}
+    .acc-map-wrap th:nth-child(1),.acc-map-wrap td:nth-child(1){max-width:200px}
+    .acc-map-wrap th:nth-child(2),.acc-map-wrap td:nth-child(2){max-width:180px}
+    .acc-map-wrap th:nth-child(3),.acc-map-wrap td:nth-child(3){max-width:200px}
+    .acc-map-wrap th:nth-child(4),.acc-map-wrap td:nth-child(4){width:40px;text-align:center}
+    .api-bar{display:flex;align-items:center;gap:var(--sp2);margin-top:var(--sp3)}
+    .api-dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex-shrink:0}
+    .api-dot.on{background:var(--success);box-shadow:0 0 8px color-mix(in srgb,var(--success) 50%,transparent)}
+    .api-dot.off{background:var(--error);box-shadow:0 0 8px color-mix(in srgb,var(--error) 50%,transparent)}
+    .api-dot.chk{background:var(--warn);animation:apiPulse 1s infinite}
+    @keyframes apiPulse{0%,100%{opacity:1}50%{opacity:.3}}
+    .toast{position:fixed;bottom:var(--sp6);right:var(--sp6);z-index:999;
+      padding:var(--sp3) var(--sp5);border-radius:var(--r-lg);
+      background:var(--success);color:#fff;font-size:var(--text-sm);
+      box-shadow:var(--sh-md);transition:opacity .3s ease,transform .3s ease;
+      opacity:0;transform:translateY(10px);pointer-events:none}
+    .toast.show{opacity:1;transform:translateY(0)}
+    .toast.error{background:var(--error)}
+    @media(max-width:900px){.grid3,.grid4{grid-template-columns:1fr 1fr}}
+    @media(max-width:600px){.grid2,.grid3,.grid4{grid-template-columns:1fr}.topbar{flex-direction:column;align-items:flex-start}}
+    @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9h7l2 6 2-6h7"/><line x1="6" y1="6" x2="6" y2="18"/><line x1="18" y1="6" x2="18" y2="18"/></svg>
+      </div>
+      <div><h1>MoneyMoney Budget Bridge<span class="badge">v5</span></h1><p>100% Browser &middot; kein Server &middot; Daten bleiben bei dir</p></div>
+    </div>
+    <div class="toolbar">
+      <button class="btn-sec btn-sm" id="btnGuide">❓ Anleitung</button>
+      <button class="btn-sec btn-sm" id="btnDemo">Demo-Daten</button>
+      <button class="btn-sec btn-sm" id="btnPreset">Preset</button>
+      <button class="btn-ghost btn-sm" id="btnTheme" aria-label="Farbmodus">🌙</button>
+    </div>
+  </header>
+  <!-- ANLEITUNG -->
+  <section class="panel hidden" id="guidePanel">
+    <div class="panel-title"><div><h2>📋 Schnell-Anleitung</h2></div><button class="btn-ghost btn-sm" id="btnCloseGuide">✕</button></div>
+    <div class="grid2" style="gap:var(--sp5)">
+      <div>
+        <div class="callout ok" style="margin-bottom:var(--sp3)"><strong>🔗 Kontobezeichnungen</strong><p><strong>Kontobezeichnung</strong> = frei wählbar (nur für dich)<br><strong>Actual-Kontoname</strong> = MUSS exakt wie in Actual Budget heißen!<br><strong>Ghostfolio UUID</strong> = aus GF → Einstellungen → API</p></div>
+        <div class="callout" style="margin-bottom:var(--sp3)"><strong>🖥️ Ghostfolio URL</strong><p>Docker lokal: <code>http://localhost:3333</code><br>LXC/Server: <code>http://192.168.X.X:3333</code><br>UUID finden: <code>http://IP:3333/api</code> → GET /api/v1/account</p></div>
+        <div class="callout warn"><strong>📦 Was auf dem Actual-Server?</strong><p><em>Nichts.</em> App läuft im Browser. CSV downloaden → per Hand in Actual importieren.</p></div>
+      </div>
+      <div>
+        <div class="callout"><strong>Ablauf in 5 Schritten</strong>
+          <p><strong>1.</strong> MoneyMoney → Konto → File → Export → CSV (Semikolon)</p>
+          <p><strong>2.</strong> Hier CSV laden + Kontobezeichnung eintragen</p>
+          <p><strong>3.</strong> "Verbinden testen" (API) → grün = ok</p>
+          <p><strong>4.</strong> Payees/Kategorien prüfen → Preset anwenden</p>
+          <p><strong>5.</strong> Export downloaden → in Actual/GF importieren</p>
+        </div>
+      </div>
+    </div>
+  </section>
+  <main>
+    <!-- PANEL 1 -->
+    <section class="panel">
+      <div class="panel-title"><div><h2>1 · Quelle &amp; Konto</h2><p>Datei laden + Kontoeinstellungen. <span class="req">*</span> = zwingend.</p></div></div>
+      <div class="grid2" style="gap:var(--sp5)">
+        <div>
+          <div class="dropzone" id="dropZone">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto var(--sp2);color:var(--primary)"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <strong style="color:var(--text)">CSV hierher ziehen</strong>
+            <input type="file" id="fileInput" accept=".csv,.tsv,.txt" style="width:auto;min-height:unset;padding:.3rem .6rem;border-radius:var(--r-md)">
+            <p>oder klicken &middot; alles läuft 100% im Browser</p>
+          </div>
+          <div id="fileInfo" class="status-line">Keine Datei geladen.</div>
+        </div>
+        <div class="grid2">
+          <label>Kontobezeichnung<span class="req">*</span> <span class="info-ic">?<span class="tip">Ein frei wählbarer Name. Wird nur für dich + Dateinamen verwendet.</span></span>
+            <input id="accountLabel" placeholder="z.B. DKB Girokonto"></label>
+          <label>Actual-Kontoname<span class="req">*</span> <span class="info-ic">?<span class="tip">MUSS exakt mit dem Kontonamen in Actual Budget übereinstimmen! Groß-/Kleinschreibung beachten.</span></span>
+            <input id="actualAccount" placeholder="z.B. Girokonto"></label>
+          <label>Ghostfolio accountId (Fallback) <span class="info-ic">?<span class="tip">Standard-UUID für alle Transaktionen. Kann in Panel 7 pro Konto überschrieben werden.</span></span>
+            <input id="ghostAccountId" placeholder="UUID (optional)"></label>
+          <label>Standardwährung<span class="req">*</span>
+            <input id="defCurrency" value="EUR" maxlength="8"></label>
+          <label>Datumsformat
+            <select id="dateFmt"><option value="auto">Auto</option><option value="de">Deutsch DD.MM.YYYY</option><option value="iso">ISO YYYY-MM-DD</option></select></label>
+          <label>Delimiter
+            <select id="delimFmt"><option value="auto">Auto</option><option value=";">Semikolon</option><option value=",">Komma</option><option value="tab">Tab</option></select></label>
+        </div>
+      </div>
+    </section>
+    <!-- PANEL 2 -->
+    <section class="panel">
+      <div class="panel-title"><div><h2>2 · Spalten-Mapping</h2><p>CSV-Spalten zuordnen. <span class="req">*</span> = müssen aktiv sein.</p></div><div id="headerHint" class="status-line" style="text-align:right"></div></div>
+      <div style="margin-bottom:var(--sp3)"><button class="btn-sm btn-sec" id="btnPreset">🔮 Preset anwenden (MoneyMoney erkennen)</button></div>
+      <div class="grid4" id="mappingGrid"></div>
+    </section>
+    <!-- PANEL 3 -->
+    <section class="panel hidden" id="dupPanel"><div class="panel-title"><div><h2>3 · Duplikate</h2></div></div><div id="dupContent"></div></section>
+    <!-- PANEL 4 -->
+    <section class="panel hidden" id="payeePanel">
+      <div class="panel-title"><div><h2>4 · Payee-Cleaning &amp; Mapping</h2><p>Regex-Bereinigung + manuelle Zuordnung. Persistent im Browser.</p></div><div class="row"><span id="payeeStats" class="status-line" style="margin:0"></span></div></div>
+      <div class="callout" style="margin-bottom:var(--sp4)"><strong>🧹 Auto-Bereinigung</strong><p>Entfernt: <code>//Ort/DE</code>, <code>*Ref*</code>, IBAN, BIC. Pro Payee überschreibbar.</p><label style="display:flex;align-items:center;gap:.4rem;font-size:var(--text-sm);margin-top:var(--sp2);cursor:pointer"><input type="checkbox" id="autoClean" checked style="width:auto;min-height:auto">Aktiv</label></div>
+      <div class="payee-toolbar"><input id="payeeSearch" class="payee-search" placeholder="🔍 Suchen..."><span id="payeeCount" class="status-line" style="margin:0"></span><button class="btn-danger btn-sm" id="btnClearPayees">Alle löschen</button></div>
+      <div class="payee-map-table tbl-wrap"><table><thead><tr><th>Original</th><th>Kurzname</th><th></th></tr></thead><tbody id="payeeMapBody"><tr><td colspan="3" style="color:var(--muted)">Lade Datei.</td></tr></tbody></table></div>
+    </section>
+    <!-- PANEL 5 -->
+    <section class="panel hidden" id="catPanel">
+      <div class="panel-title"><div><h2>5 · Kategorie-Mapping</h2></div><span id="catStats" class="status-line" style="margin:0"></span></div>
+      <div class="cat-bulk-bar"><input id="catBulkTarget" placeholder="Alle setzen auf..." style="min-height:34px;padding:.4rem .6rem;font-size:var(--text-sm);width:200px"><button class="btn-sec btn-sm" id="btnCatBulkApply">Übernehmen</button><button class="btn-ghost btn-sm" id="btnCatBulkReset">Reset</button></div>
+      <div class="cat-map-wrap tbl-wrap"><table><thead><tr><th>MM-Kategorie</th><th>Budget-Kategorie</th><th></th></tr></thead><tbody id="catMapBody"><tr><td colspan="3" style="color:var(--muted)">Lade Datei.</td></tr></tbody></table></div>
+    </section>
+    <!-- PANEL 6 -->
+    <section class="panel">
+      <div class="panel-title"><div><h2>6 · Ghostfolio-Modus</h2><p>Cash oder Wertpapiere.</p></div></div>
+      <div class="mode-tabs" role="tablist"><button class="mode-tab active" data-mode="cash" role="tab" aria-selected="true">💶 Cash / Banking</button><button class="mode-tab" data-mode="securities" role="tab" aria-selected="false">📈 Wertpapiere</button></div>
+      <div class="mode-pane active" id="mode-cash"><div class="callout" style="margin-bottom:var(--sp4)"><strong>Cash-Modus</strong><p>DEPOSIT (Guthaben) · WITHDRAWAL (Ausgaben) · INTEREST · FEE</p></div><div class="grid4"><label>Typ positiv<select id="cashTypePos"><option value="DEPOSIT" selected>DEPOSIT</option><option value="INTEREST">INTEREST</option><option value="DIVIDEND">DIVIDEND</option></select></label><label>Typ negativ<select id="cashTypeNeg"><option value="WITHDRAWAL" selected>WITHDRAWAL</option><option value="FEE">FEE</option></select></label><label>Symbol (leer = Währung)<input id="cashSymbol" placeholder="z.B. EUR"></label><label>Betrag umdrehen<select id="cashInvert"><option value="false" selected>Nein</option><option value="true">Ja</option></select></label></div></div>
+      <div class="mode-pane" id="mode-securities"><div class="callout" style="margin-bottom:var(--sp4)"><strong>Wertpapier-Modus</strong></div><div class="grid4"><label>Standard-Typ<select id="secType"><option value="BUY" selected>BUY</option><option value="SELL">SELL</option><option value="DIVIDEND">DIVIDEND</option><option value="auto">Auto</option></select></label><label>dataSource<select id="secDataSource"><option value="YAHOO" selected>YAHOO</option><option value="MANUAL">MANUAL</option><option value="COINGECKO">COINGECKO</option></select></label><label>Fallback Menge<input id="secQtyFallback" value="1" type="number" min="0" step="any"></label><label>Fallback Preis<input id="secPriceFallback" value="0" type="number" min="0" step="any"></label></div></div>
+    </section>
+    <!-- PANEL 7 -->
+    <section class="panel hidden" id="accPanel">
+      <div class="panel-title"><div><h2>7 · Konto → Ghostfolio-Account</h2></div><span id="accStats" class="status-line" style="margin:0"></span></div>
+      <div class="callout" style="margin-bottom:var(--sp4)"><strong>UUID finden:</strong> <code>http://DEINE-IP:3333/api</code> → GET /api/v1/account</div>
+      <div class="acc-map-wrap tbl-wrap"><table><thead><tr><th>MM-Konto</th><th>GF-Name</th><th>GF-UUID</th><th></th></tr></thead><tbody id="accMapBody"><tr><td colspan="4" style="color:var(--muted)">Lade Datei.</td></tr></tbody></table></div>
+    </section>
+    <!-- PANEL 8 -->
+    <section class="panel">
+      <div class="panel-title"><div><h2>8 · Vorschau</h2><p>Normalisierte Daten — vor dem Export prüfen.</p></div>
+        <div class="stat-row"><div class="stat"><strong id="sRows">0</strong><span>Zeilen</span></div><div class="stat"><strong id="sActual">0</strong><span>Actual</span></div><div class="stat"><strong id="sGhost">0</strong><span>GF</span></div><div class="stat"><strong id="sNet">0,00</strong><span>Saldo</span></div><div class="stat"><strong id="sIn">0,00</strong><span>+</span></div><div class="stat"><strong id="sOut">0,00</strong><span>-</span></div></div>
+      </div>
+      <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Datum</th><th>Betrag</th><th>Payee</th><th>Kategorie</th><th>GF-Typ</th><th>Symbol</th><th>Konto</th></tr></thead><tbody id="previewBody"><tr><td colspan="8" style="color:var(--muted)">Demo-Daten laden oder Datei wählen.</td></tr></tbody></table></div>
+    </section>
+    <!-- PANEL 9 -->
+    <section class="panel">
+      <div class="panel-title"><div><h2>9 · Export</h2><p>Herunterladen oder via API senden.</p></div></div>
+      <div id="exportInfo" class="status-line" style="margin-bottom:var(--sp4)"></div>
+      <div class="out-tabs" role="tablist"><button class="out-tab active" data-out="actual">Actual CSV</button><button class="out-tab" data-out="ghost">GF JSON</button><button class="out-tab" data-out="ghostcsv">GF CSV</button><button class="out-tab" data-out="api">GF API ↗</button></div>
+      <div class="out-pane active" id="out-actual"><div class="grid2"><div><div class="callout"><strong>Actual Budget CSV</strong><p>date, payee, notes, category, amount, account, imported_id</p></div><div class="row" style="margin-top:var(--sp4)"><button class="btn" id="dlActual">⬇ Download</button><button class="btn-sec" id="cpActual">Kopieren</button></div></div><label>Vorschau<textarea id="outActual" readonly></textarea></label></div></div>
+      <div class="out-pane" id="out-ghost"><div class="grid2"><div><div class="callout"><strong>Ghostfolio JSON (v2)</strong></div><div class="row" style="margin-top:var(--sp4)"><button class="btn" id="dlGhost">⬇ Download</button><button class="btn-sec" id="cpGhost">Kopieren</button></div></div><label>Vorschau<textarea id="outGhost" readonly></textarea></label></div></div>
+      <div class="out-pane" id="out-ghostcsv"><div class="grid2"><div><div class="callout"><strong>Ghostfolio CSV</strong></div><div class="row" style="margin-top:var(--sp4)"><button class="btn" id="dlGhostCsv">⬇ Download</button><button class="btn-sec" id="cpGhostCsv">Kopieren</button></div></div><label>Vorschau<textarea id="outGhostCsv" readonly></textarea></label></div></div>
+      <div class="out-pane" id="out-api"><div class="grid2"><div class="grid2" style="align-content:start"><label>API-Endpunkt<span class="req">*</span><input id="apiUrl" value="http://localhost:3333/api/v1/import"></label><label>Bearer-Token<input id="apiToken" type="password" placeholder="Optional bei lokalem GF"></label><label>Methode<select id="apiMethod"><option value="POST" selected>POST</option><option value="PUT">PUT</option></select></label><label>Payload<select id="apiPayload"><option value="wrap" selected>v2 { meta, activities }</option><option value="raw">v1 Array</option></select></label><label>Batch-Größe<input id="apiBatchSize" value="50" type="number" min="1" max="500"></label></div><div><div class="callout warn"><strong>⚠️ Experimentell</strong><p>CORS muss erlaubt sein. Download ist sicherer.</p></div><div class="api-bar"><div class="api-dot" id="apiDot"></div><span id="apiStatusText" class="status-line" style="margin:0">Nicht getestet</span><button class="btn-test" id="btnApiTest">🔌 Testen</button></div><div class="row" style="margin-top:var(--sp4)"><button class="btn" id="btnSend" disabled>📤 Senden</button><button class="btn-sec" id="cpPayload">Payload kopieren</button></div><div id="apiStatus" class="status-line" style="margin-top:var(--sp3)"></div></div></div></div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+'use strict';
+const S={headers:[],rawRows:[],delimiter:';',normalized:[],actualCsv:'',gfActivities:[],gfCsv:'',payeeMap:{},uniquePayees:[],autoClean:true,catMap:{},uniqueCats:[],accMap:{},uniqueAccs:[],dupFilter:false,dupGroups:[]};
+const STORAGE_KEYS={payee:'mm-v4-payee',cat:'mm-v4-cat',acc:'mm-v4-acc'};
+function loadJSON(key,def){try{const s=localStorage.getItem(key);return s?JSON.parse(s):def;}catch(e){return def;}}
+function saveJSON(key,val){try{localStorage.setItem(key,JSON.stringify(val));}catch(e){}}
+
+// ── PAYEE CLEANING ──
+const CLEAN_PATTERNS=[
+  {regex:/PayPal\s+\*(.+?)\*.*/i,replace:'PayPal $1'},
+  {regex:/^(.+?)\/\/[A-Za-zäöüÄÖÜß\s]+\/[A-Z]{2}$/,replace:'$1'},
+  {regex:/^(.+?)\/\/[A-Za-zäöüÄÖÜß\s]+$/,replace:'$1'},
+  {regex:/^(.+?)\s+\*[\d]+\*$/,replace:'$1'},
+  {regex:/^(.+?)\s+\/\s+[A-Z]{2}\d{2}[\d\s]+\s*\/.*$/,replace:'$1'},
+  {regex:/^(.+?)\s+[A-Z]{2}\d{2}[\d\s]{10,}.*$/,replace:'$1'},
+  {regex:/^(.+?)\s+[A-Z]{8,11}\s*$/,replace:'$1'},
+  {regex:/^(.+?)\s+-\s+Referenz.*$/i,replace:'$1'},
+  {regex:/\s{2,}/g,replace:' '},
+  {regex:/^\s+|\s+$/g,replace:''},
+];
+function cleanPayeeName(raw){
+  if(!raw||!S.autoClean)return{cleaned:raw||'',wasCleaned:false};
+  let c=raw.trim();let w=false;
+  for(const p of CLEAN_PATTERNS){const b=c;c=c.replace(p.regex,p.replace);if(c!==b){w=true;break;}}
+  return{cleaned:c.trim(),wasCleaned:w};
+}
+const KNOWN=[[/^PayPal\s+(.+)$/i,'PayPal'],[/^(Amazon|AMAZON)/i,'Amazon'],[/^(REWE|Rewe)/,'REWE'],[/^(EDEKA|Edeka)/,'EDEKA'],[/^(ALDI|aldi)/i,'Aldi'],[/^(LIDL|Lidl)/i,'Lidl'],[/^(NETTO|Netto)/i,'Netto'],[/^(DM|dm)/i,'DM'],[/^(ROSSMANN|Rossmann)/i,'Rossmann'],[/^(IKEA|Ikea)/i,'IKEA'],[/^(H&M|h\s*&\s*m)/i,'H&M'],[/^(Zalando)/i,'Zalando'],[/^(Uber\s*Eats)/i,'Uber Eats'],[/^(Lieferando)/i,'Lieferando'],[/^(Spotify)/i,'Spotify'],[/^(Netflix)/i,'Netflix'],[/^(Apple|iTunes)/i,'Apple'],[/^(Shell|Esso|Aral|Total)/i,'$1'],[/^(DB|Deutsche\s*Bahn)/i,'Deutsche Bahn'],[/^(Gehalt|Lohn)/i,'Gehalt'],[/^(Miete|Mieter)/i,'Miete'],[/^(HUK|HUK24|Allianz|AXA|DKV|TK)/i,'$1']];
+function suggestShortName(c){
+  for(const[k,n] of KNOWN)if(k.test(c))return c.replace(k,n);
+  const w=c.split(/\s+/);return w.length>=2&&w[0].length<=2?w.slice(0,2).join(' '):w[0]||c;
+}
+
+// ── DUPLICATES ──
+function detectDuplicates(){
+  const map=new Map();
+  S.rawRows.forEach(function(r,i){
+    var date=r.Datum||r.date||r.Buchungsdatum||r['Wertstellung']||'';
+    var amtStr=r.Betrag||r.amount||r.Umsatz||'';
+    var amt=parseNum(amtStr);
+    var payee=r.Name||r.payee||r.Empfänger||r.Auftraggeber||'';
+    if(!date||amt===null)return;
+    var key=date+'|'+amt+'|'+payee;
+    if(!map.has(key))map.set(key,[]);
+    map.get(key).push(i);
+  });
+  S.dupGroups=[...map.values()].filter(function(g){return g.length>1;}).map(function(g){return {indices:g};});
+}
+function getDupFilteredRows(){
+  if(!S.dupFilter||!S.dupGroups.length)return S.normalized;
+  const dup=new Set();S.dupGroups.forEach(g=>g.indices.slice(1).forEach(i=>dup.add(i)));
+  return S.normalized.filter(r=>!dup.has(r._rawIdx));
+}
+
+// ── PAYEE RESOLVE ──
+function resolvePayee(raw){
+  if(S.payeeMap[raw])return{name:S.payeeMap[raw],source:'manual'};
+  const{cleaned}=cleanPayeeName(raw);return{name:cleaned,source:'auto'};
+}
+
+// ── MAPPING FIELDS ──
+const MF=[
+  ['date','Datum'],['valueDate','Wertstellung'],['amount','Betrag'],['currency','Währung'],
+  ['payee','Name (Payee)'],['purpose','Verwendungszweck'],['category','Kategorie'],
+  ['note','Konto / Notiz'],['bank','Bank'],['type','GF Typ'],['symbol','Symbol / Ticker'],
+  ['isin','ISIN'],['quantity','Menge'],['unitPrice','Stückpreis'],['fee','Gebühr'],['id','Import-ID']
+];
+
+// ── DEMO ──
+const DEMO=[
+  'Datum;Wertstellung;Kategorie;Name;Verwendungszweck;Konto;Bank;Betrag;Währung',
+  '25.05.2026;25.05.2026;Lebensmittel;REWE Markt Schmidt//Langenzenn/DE;Einkauf Wochenendeinkauf;DE12345678901234567890;SSKMDEMMXXX;-54,90;EUR',
+  '24.05.2026;24.05.2026;Einkommen;Musterfirma GmbH;Gehalt Mai 2026;DE12345678901234567890;SSKMDEMMXXX;3200,00;EUR',
+  '23.05.2026;23.05.2026;Nebenkosten;Stadtwerke München;Stromabschlag Mai 2026;DE12345678901234567890;SSKMDEMMXXX;-89,00;EUR',
+  '22.05.2026;22.05.2026;Zinsen;DKB AG;Habenzinsen April 2026;DE98765432101234567890;BELADEBEXXX;7,12;EUR',
+  '21.05.2026;21.05.2026;Versicherung;HUK24 AG / HUK-Coburg Unternehmensgruppe;KFZ-Versicherung Beitrag Hj. 2026;DE12345678901234567890;SSKMDEMMXXX;-234,56;EUR',
+  '20.05.2026;20.05.2026;Online;PayPal *Amazon*AB-12345678;Bestellung Bücher;DE12345678901234567890;SSKMDEMMXXX;-29,99;EUR',
+  '19.05.2026;19.05.2026;Mobilität;Shell Tankstelle München;Tanken Super Plus;DE12345678901234567890;SSKMDEMMXXX;-68,40;EUR',
+  '18.05.2026;18.05.2026;Essen;Uber Eats//Berlin/DE;Essen bestellen Lieferando;DE12345678901234567890;SSKMDEMMXXX;-18,75;EUR',
+  '17.05.2026;17.05.2026;Lebensmittel;EDEKA Center Müller//Nürnberg/DE;Wocheneinkauf;DE12345678901234567890;SSKMDEMMXXX;-87,23;EUR',
+  '16.05.2026;16.05.2026;Freizeit;Spotify AB;Spotify Premium Abo;DE12345678901234567890;SSKMDEMMXXX;-9,99;EUR',
+  '15.05.2026;15.05.2026;Miete;Mustermann Vermieter;Miete Mai 2026;DE12345678901234567890;SSKMDEMMXXX;-850,00;EUR',
+  '14.05.2026;14.05.2026;Versicherung;Allianz Versicherung;Beitrag Lebensversicherung;DE12345678901234567890;SSKMDEMMXXX;-120,00;EUR',
+  '13.05.2026;13.05.2026;Telekom;Telekom Deutschland GmbH;Mobilfunk Rechnung Mai;DE12345678901234567890;SSKMDEMMXXX;-35,99;EUR',
+  '12.05.2026;12.05.2026;Online;PayPal *Netflix*98765432;Netflix Abo;DE12345678901234567890;SSKMDEMMXXX;-17,99;EUR',
+  '11.05.2026;11.05.2026;Lebensmittel;Lidl Vertriebs GmbH//Fürth/DE;Einkauf;DE12345678901234567890;SSKMDEMMXXX;-42,15;EUR',
+  '10.05.2026;10.05.2026;Gehalt;Musterfirma GmbH;Gehalt Mai 2026;DE12345678901234567890;SSKMDEMMXXX;3200,00;EUR',
+  '09.05.2026;09.05.2026;Mobilität;Deutsche Bahn AG;Fahrkarte München-Berlin;DE12345678901234567890;SSKMDEMMXXX;-59,90;EUR',
+  '08.05.2026;08.05.2026;Gesundheit;DM Drogerie Markt//Erlangen/DE;Apotheke;DE12345678901234567890;SSKMDEMMXXX;-23,47;EUR',
+  '07.05.2026;07.05.2026;Abo;Apple iTunes Store;Apple Music Abo;DE12345678901234567890;SSKMDEMMXXX;-10,99;EUR',
+  '06.05.2026;06.05.2026;Lebensmittel;ALDI Nord//Schweinfurt/DE;Wocheneinkauf;DE12345678901234567890;SSKMDEMMXXX;-61,30;EUR',
+  '05.05.2026;05.05.2026;Kleidung;Zalando SE//Berlin/DE;Bestellung Kleidung;DE12345678901234567890;SSKMDEMMXXX;-79,95;EUR',
+  '04.05.2026;04.05.2026;Essen;Lieferando//München/DE;Pizza bestellt;DE12345678901234567890;SSKMDEMMXXX;-22,50;EUR',
+  '03.05.2026;03.05.2026;Gehalt;Musterfirma GmbH;Gehalt Mai 2026;DE12345678901234567890;SSKMDEMMXXX;3200,00;EUR',
+  '02.05.2026;02.05.2026;Miete;Mustermann Vermieter;Miete Mai 2026;DE12345678901234567890;SSKMDEMMXXX;-850,00;EUR',
+  '01.05.2026;01.05.2026;Versicherung;HUK24 AG / HUK-Coburg;KFZ-Versicherung;DE12345678901234567890;SSKMDEMMXXX;-234,56;EUR',
+  // Duplikat-Gruppe 1: REWE 2x gleich
+  '25.05.2026;25.05.2026;Lebensmittel;REWE Markt Schmidt//Langenzenn/DE;Einkauf;DE00000000000000000000;SSKMDEMMXXX;-54,90;EUR',
+  '25.05.2026;25.05.2026;Lebensmittel;REWE Markt Schmidt//Langenzenn/DE;Einkauf;DE00000000000000000000;SSKMDEMMXXX;-54,90;EUR',
+  // Duplikat-Gruppe 2: Gehalt 3x gleich
+  '15.05.2026;15.05.2026;Einkommen;Musterfirma GmbH;Gehalt Mai 2026;DE00000000000000000000;SSKMDEMMXYZ;2800,00;EUR',
+  '15.05.2026;15.05.2026;Einkommen;Musterfirma GmbH;Gehalt Mai 2026;DE00000000000000000000;SSKMDEMMXYZ;2800,00;EUR',
+  '15.05.2026;15.05.2026;Einkommen;Musterfirma GmbH;Gehalt Mai 2026;DE00000000000000000000;SSKMDEMMXYZ;2800,00;EUR',
+].join('\n');
+
+const $=id=>document.getElementById(id);
+const el={
+  file:$('fileInput'),fileInfo:$('fileInfo'),mappingGrid:$('mappingGrid'),headerHint:$('headerHint'),
+  previewBody:$('previewBody'),outActual:$('outActual'),outGhost:$('outGhost'),outGhostCsv:$('outGhostCsv'),
+  accountLabel:$('accountLabel'),actualAccount:$('actualAccount'),ghostAccountId:$('ghostAccountId'),
+  defCurrency:$('defCurrency'),dateFmt:$('dateFmt'),delimFmt:$('delimFmt'),
+  cashTypePos:$('cashTypePos'),cashTypeNeg:$('cashTypeNeg'),cashSymbol:$('cashSymbol'),cashInvert:$('cashInvert'),
+  secType:$('secType'),secDataSource:$('secDataSource'),secQtyFallback:$('secQtyFallback'),secPriceFallback:$('secPriceFallback'),
+  sRows:$('sRows'),sActual:$('sActual'),sGhost:$('sGhost'),sNet:$('sNet'),sIn:$('sIn'),sOut:$('sOut'),
+  apiUrl:$('apiUrl'),apiToken:$('apiToken'),apiMethod:$('apiMethod'),apiPayload:$('apiPayload'),
+  apiStatus:$('apiStatus'),apiBatchSize:$('apiBatchSize'),
+  dupPanel:$('dupPanel'),dupContent:$('dupContent'),
+  payeePanel:$('payeePanel'),autoClean:$('autoClean'),payeeSearch:$('payeeSearch'),
+  btnClearPayees:$('btnClearPayees'),catPanel:$('catPanel'),catBulkTarget:$('catBulkTarget'),
+  btnCatBulkApply:$('btnCatBulkApply'),btnCatBulkReset:$('btnCatBulkReset'),
+  accPanel:$('accPanel'),exportInfo:$('exportInfo'),dropZone:$('dropZone'),btnSend:$('btnSend'),
+  btnApiTest:$('btnApiTest'),apiDot:$('apiDot'),apiStatusText:$('apiStatusText'),
+  guidePanel:$('guidePanel'),btnGuide:$('btnGuide'),btnCloseGuide:$('btnCloseGuide'),
+  toast:$('toast')
+};
+
+// ── CSV PARSER ──
+function detectDelimiter(text){
+  const m=el.delimFmt.value;if(m==='tab')return'\t';if(m!=='auto')return m;
+  const s=text.slice(0,2000);return[[';',(s.match(/;/g)||[]).length],[',',(s.match(/,/g)||[]).length],['\t',(s.match(/\t/g)||[]).length]].sort((a,b)=>b[1]-a[1])[0][0];
+}
+function parseDelimited(text,sep){
+  const rows=[];let row=[],val='',inQ=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i],n=text[i+1];
+    if(c==='"'){if(inQ&&n==='"'){val+='"';i++;}else{inQ=!inQ;}continue;}
+    if(!inQ&&c===sep){row.push(val);val='';continue;}
+    if(!inQ&&(c==='\n'||c==='\r')){if(c==='\r'&&n==='\n')i++;row.push(val);if(row.some(x=>x!==''))rows.push(row);row=[];val='';continue;}
+    val+=c;
+  }
+  if(val||row.length){row.push(val);rows.push(row);}
+  const[hdr,...data]=rows;const headers=(hdr||[]).map(h=>h.trim());
+  const objects=data.filter(r=>r.some(x=>x.trim()!=='')).map(r=>{const o={};headers.forEach((h,i)=>o[h]=(r[i]||'').trim());return o;});
+  return{headers,rows:objects};
+}
+
+// ── NUMBER / DATE ──
+function parseNum(v){if(v==null||v==='')return null;const s=String(v).trim().replace(/\s/g,'').replace(/\.(?=\d{3}(\D|$))/g,'').replace(',','.');const n=Number(s);return isFinite(n)?n:null;}
+function parseDate(v){if(!v)return'';const s=String(v).trim();if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);const fmt=el.dateFmt.value;const de=s.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})$/);if(de&&(fmt==='de'||fmt==='auto')){let[,d,m,y]=de;if(y.length===2)y='20'+y;return`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;}const p=new Date(s);return isNaN(p)?s:p.toISOString().slice(0,10);}
+function toIsoZ(d){if(!d)return new Date().toISOString();if(/^\d{4}-\d{2}-\d{2}T/.test(d))return d;return d+'T00:00:00.000Z';}
+
+// ── MAPPING HELPERS ──
+function buildMappingGrid(hdrs=[]){
+  el.mappingGrid.innerHTML='';
+  MF.forEach(([k,lbl])=>{const w=document.createElement('label');const s=document.createElement('select');s.dataset.map=k;s.innerHTML=`<option value="">– nicht verwenden –</option>`+hdrs.map(h=>`<option value="${h.replace(/"/g,'&quot;')}">${h}</option>`).join('');w.innerHTML=`<strong>${lbl}</strong>`;w.appendChild(s);el.mappingGrid.appendChild(w);});
+}
+function getMap(){return Object.fromEntries([...document.querySelectorAll('[data-map]')].map(s=>[s.dataset.map,s.value]));}
+function setMap(key,val){const s=document.querySelector(`[data-map="${key}"]`);if(s&&val){for(const o of s.options)if(o.value===val){s.value=val;return;}}}
+function applyPreset(){
+  const h=S.headers;
+  const find=(...pats)=>h.find(hh=>pats.some(p=>hh===p))||h.find(hh=>pats.some(p=>hh.toLowerCase().includes(p.toLowerCase())));
+  setMap('date',find('Datum','Buchungstag','Buchungsdatum','Valuta','Date'));
+  setMap('valueDate',find('Wertstellung','ValueDate'));
+  setMap('amount',find('Betrag','Amount','Umsatz'));
+  setMap('currency',find('Währung','Currency','Waehrung'));
+  setMap('payee',find('Name','Empfänger','Auftraggeber','Payee','PayeeName'));
+  setMap('purpose',find('Verwendungszweck','Purpose','Beschreibung','Memo','Buchungstext','Text'));
+  setMap('category',find('Kategorie','Category'));
+  setMap('note',find('Konto','Kommentar','Note','Notiz','Notes'));
+  setMap('bank',find('Bank','BIC','Institut','Institute'));
+  setMap('symbol',find('Symbol','Ticker','ISIN'));
+  setMap('isin',find('ISIN','Symbol'));
+  setMap('fee',find('Gebühr','Gebuehr','Fee','Commission'));
+  setMap('id',find('Umsatz-ID','Transaktion-ID','Reference','Referenz','ID'));
+  renderAll();
+}
+function pickVal(row,key,fb=''){const m=getMap();return m[key]?(row[m[key]]??fb):fb;}
+
+// ── NORMALIZE ──
+function normalizeRows(){
+  const invert=el.cashInvert.value==='true';
+  return S.rawRows.map((row,rawIdx)=>{
+    let amt=parseNum(pickVal(row,'amount'));if(amt!==null&&invert)amt*=-1;
+    const date=parseDate(pickVal(row,'date')||pickVal(row,'valueDate'));
+    const currency=(pickVal(row,'currency')||el.defCurrency.value||'EUR').trim().toUpperCase();
+    const rawPayee=pickVal(row,'payee')||'Unbekannt';
+    const{name}=resolvePayee(rawPayee);
+    const parts=[pickVal(row,'purpose'),pickVal(row,'note')].filter(Boolean);const memo=parts.join(' | ');
+    const rawCat=pickVal(row,'category');const category=S.catMap[rawCat]||rawCat;
+    const symbol=pickVal(row,'symbol');const isin=pickVal(row,'isin');
+    const quantity=parseNum(pickVal(row,'quantity'));const unitPrice=parseNum(pickVal(row,'unitPrice'));const fee=parseNum(pickVal(row,'fee'));
+    const id=pickVal(row,'id')||`${slugify(el.accountLabel.value||'konto')}-${date||'nd'}-${rawIdx+1}`;
+    const mmAccount=pickVal(row,'Konto')||pickVal(row,'account')||pickVal(row,'Kontobezeichnung')||'';
+    let gfType;
+    if(currentMode==='cash'){const ex=pickVal(row,'type');gfType=ex?ex.toUpperCase():(amt!=null&&amt<0)?el.cashTypeNeg.value:el.cashTypePos.value;}
+    else{const t=el.secType.value;gfType=t==='auto'?(amt!=null&&amt<0)?'SELL':'BUY':t;}
+    const accMapping=S.accMap[mmAccount];
+    const accountId=accMapping?.uuid||el.ghostAccountId.value||undefined;
+    const accountName=accMapping?.name||mmAccount||undefined;
+    return{idx:rawIdx+1,_rawIdx:rawIdx,date,amount:amt,currency,payee:name,rawPayee,memo,category,rawCat,gfType,symbol,isin,quantity,unitPrice,fee,id,mmAccount,accountId,accountName,row};
+  }).filter(r=>r.date||r.amount!=null);
+}
+
+// ── EXPORT BUILDERS ──
+function csvEsc(v){const s=String(v??'');return/[",\n\r]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;}
+function buildActualCsv(rows){
+  const hdr=['date','payee','notes','category','amount','account','imported_id'];
+  const data=rows.map(r=>[r.date,r.payee,r.memo,r.category,r.amount==null?'':r.amount.toFixed(2),r.accountName||el.actualAccount.value||el.accountLabel.value||'',r.id]);
+  return[hdr,...data].map(l=>l.map(csvEsc).join(',')).join('\n');
+}
+function buildGhostfolioActivities(rows){
+  return rows.map(r=>{
+    const abs=r.amount==null?0:Math.abs(r.amount);let symbol,ds,qty,up;
+    if(currentMode==='cash'){symbol=(el.cashSymbol.value.trim()||r.currency||'EUR').toUpperCase();ds='MANUAL';qty=1;up=abs;}
+    else{const fb=el.secDataSource.value;symbol=r.symbol||r.isin||'UNKNOWN';ds=r.isin?'MANUAL':fb;qty=r.quantity!=null?r.quantity:parseFloat(el.secQtyFallback.value)||1;up=r.unitPrice!=null?r.unitPrice:parseFloat(el.secPriceFallback.value)||abs;}
+    const act={currency:r.currency||'EUR',dataSource:ds,date:toIsoZ(r.date),fee:r.fee??0,quantity:qty,symbol,type:r.gfType,unitPrice:up,comment:r.memo||undefined,accountId:r.accountId||undefined};
+    return Object.fromEntries(Object.entries(act).filter(([,v])=>v!==undefined&&v!==''));
+  });
+}
+function buildGfExport(a){return{meta:{date:new Date().toISOString(),version:'v2'},activities:a};}
+function buildGhostfolioCsv(rows){
+  const hdr=['date','type','symbol','quantity','unitprice','currency','fee','account','comment'];
+  const data=rows.map(r=>{
+    const abs=r.amount==null?0:Math.abs(r.amount);let symbol,qty,up;
+    if(currentMode==='cash'){symbol=(el.cashSymbol.value.trim()||r.currency||'EUR').toUpperCase();qty=1;up=abs;}
+    else{symbol=r.symbol||r.isin||'UNKNOWN';qty=r.quantity!=null?r.quantity:parseFloat(el.secQtyFallback.value)||1;up=r.unitPrice!=null?r.unitPrice:parseFloat(el.secPriceFallback.value)||abs;}
+    return[r.date,r.gfType,symbol,qty,up.toFixed(2),r.currency||'EUR',(r.fee??0).toFixed(2),r.accountName||'',r.memo?csvEsc(r.memo):''];
+  });
+  return[hdr,...data].map(l=>l.join(',')).join('\n');
+}
+
+// ── RENDER UTILS ──
+const fmt=v=>new Intl.NumberFormat('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}).format(v||0);
+function slugify(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'export';}
+function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function pillType(t){if(['DEPOSIT','INTEREST','DIVIDEND','BUY'].includes(t))return`<span class="pill pill-green">${t}</span>`;if(['WITHDRAWAL','FEE','SELL'].includes(t))return`<span class="pill pill-red">${t}</span>`;return`<span class="pill pill-blue">${t}</span>`;}
+
+// ── DUPLICATE UI ──
+function renderDuplicates(){
+  const c=el.dupContent;
+  if(!S.dupGroups.length){c.innerHTML=`<div class="callout"><strong>✅ Keine Duplikate</strong><p>Alle Transaktionen sind eindeutig.</p></div>`;return;}
+  const total=S.dupGroups.reduce((a,g)=>a+g.indices.length-1,0);
+  let rows='';S.dupGroups.forEach(g=>g.indices.forEach((idx,i)=>{const r=S.rawRows[idx];const d=r.date||r.Datum||'';const a=r.amount||r.Betrag||'';const p=r.payee||r.Name||'';rows+=`<tr class="${i>0?'dup-row-highlight':''}"><td>${esc(d)}</td><td>${esc(a)}</td><td class="wrap">${esc(p)}</td><td>${i===0?'<span class="dup-badge">ORIGINAL</span>':'<span class="dup-badge" style="background:color-mix(in srgb,var(--error) 18%,transparent);color:var(--error)">DUPLIKAT</span>'}</td></tr>`;}));
+  c.innerHTML=`<div class="dup-warning"><strong>⚠️ ${S.dupGroups.length} Duplikat-Gruppen</strong><p><span class="dup-count">${total}</span> Transaktionen sind mögliche Duplikate.</p><div class="row" style="margin-top:var(--sp3)"><label style="display:flex;align-items:center;gap:.4rem;font-size:var(--text-sm);color:var(--text);margin:0;cursor:pointer"><input type="checkbox" id="dupFilter" ${S.dupFilter?'checked':''} style="width:auto;min-height:auto">Duplikate aus Export entfernen</label></div></div><div class="dup-table tbl-wrap"><table><thead><tr><th>Datum</th><th>Betrag</th><th>Payee</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  c.querySelector('#dupFilter').addEventListener('change',e=>{S.dupFilter=e.target.checked;renderAll();});
+}
+
+// ── PAYEE UI ──
+function renderPayeeMapping(){
+  const tbody=document.getElementById('payeeMapBody');
+  const sv=(el.payeeSearch?.value||'').toLowerCase();
+  const ps=new Map();
+  S.rawRows.forEach(r=>{const raw=r.Name||r.payee||r.Empfänger||r.Auftraggeber||'';if(!raw)return;if(!ps.has(raw)){const{cleaned}=cleanPayeeName(raw);ps.set(raw,{count:0,cleaned,suggestion:suggestShortName(cleaned)});}ps.get(raw).count++;});
+  S.uniquePayees=[...ps.entries()];
+  const filtered=sv?S.uniquePayees.filter(([r,i])=>r.toLowerCase().includes(sv)||i.cleaned.toLowerCase().includes(sv)||(S.payeeMap[r]||'').toLowerCase().includes(sv)):S.uniquePayees;
+  const mapped=Object.keys(S.payeeMap).length;
+  document.getElementById('payeeStats').textContent=`${S.uniquePayees.length} Payees · ${mapped} zugeordnet`;
+  document.getElementById('payeeCount').textContent=`Zeige ${filtered.length} von ${S.uniquePayees.length}`;
+  if(!filtered.length){tbody.innerHTML='<tr><td colspan="3" style="color:var(--muted)">Keine.</td></tr>';return;}
+  tbody.innerHTML=filtered.map(([raw,info])=>{
+    const manual=S.payeeMap[raw];const display=manual||info.cleaned;const isM=!!manual;
+    const{cleaned,wasCleaned}=cleanPayeeName(raw);
+    return`<tr><td class="wrap"><div class="payee-original" title="${esc(raw)}">${esc(raw)}</div>${wasCleaned&&!isM?`<div class="payee-clean">→ ${esc(cleaned)}</div>`:''}</td><td><div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap"><input type="text" class="payee-name-input" data-raw="${esc(raw)}" value="${esc(display)}" placeholder="${esc(info.suggestion)}" style="min-height:34px;padding:.4rem .6rem;font-size:var(--text-sm);flex:1;min-width:120px">${isM?'<span class="imported-tag">MANUELL</span>':''}</div>${!isM?`<div class="payee-suggestion" data-raw="${esc(raw)}" data-suggestion="${esc(info.suggestion)}"><span>💡</span><span class="apply-btn">${esc(info.suggestion)}</span> übernehmen</div>`:''}</td><td>${isM?`<button class="payee-reset" data-raw="${esc(raw)}">✕</button>`:''}</td></tr>`;
+  }).join('');
+  tbody.querySelectorAll('.payee-name-input').forEach(i=>{i.addEventListener('change',e=>{const r=e.target.dataset.raw;const v=e.target.value.trim();if(v)S.payeeMap[r]=v;else delete S.payeeMap[r];saveJSON(STORAGE_KEYS.payee,S.payeeMap);renderPayeeMapping();renderAll();});});
+  tbody.querySelectorAll('.payee-suggestion').forEach(b=>{b.addEventListener('click',e=>{const r=e.currentTarget.dataset.raw;S.payeeMap[r]=e.currentTarget.dataset.suggestion;saveJSON(STORAGE_KEYS.payee,S.payeeMap);renderPayeeMapping();renderAll();});});
+  tbody.querySelectorAll('.payee-reset').forEach(b=>{b.addEventListener('click',e=>{delete S.payeeMap[e.target.dataset.raw];saveJSON(STORAGE_KEYS.payee,S.payeeMap);renderPayeeMapping();renderAll();});});
+}
+
+// ── CATEGORY UI ──
+function renderCatMapping(){
+  const tbody=document.getElementById('catMapBody');
+  const cs=new Map();S.rawRows.forEach(r=>{const c=pickVal(r,'category');if(c)cs.set(c,(cs.get(c)||0)+1);});
+  S.uniqueCats=[...cs.entries()];
+  document.getElementById('catStats').textContent=`${S.uniqueCats.length} Kategorien · ${Object.keys(S.catMap).length} zugeordnet`;
+  if(!S.uniqueCats.length){tbody.innerHTML='<tr><td colspan="3" style="color:var(--muted)">Keine.</td></tr>';return;}
+  tbody.innerHTML=S.uniqueCats.map(([cat,ct])=>{
+    const m=S.catMap[cat]||'';
+    return`<tr><td>${esc(cat)} <span style="color:var(--faint)">(${ct}×)</span></td><td><input type="text" class="cat-map-input" data-cat="${esc(cat)}" value="${esc(m)}" placeholder="${esc(cat)}" style="min-height:34px;padding:.4rem .6rem;font-size:var(--text-sm)"></td><td>${m?`<button class="cat-map-reset" data-cat="${esc(cat)}">✕</button>`:''}</td></tr>`;
+  }).join('');
+  tbody.querySelectorAll('.cat-map-input').forEach(i=>{i.addEventListener('change',e=>{const c=e.target.dataset.cat;const v=e.target.value.trim();if(v)S.catMap[c]=v;else delete S.catMap[c];saveJSON(STORAGE_KEYS.cat,S.catMap);renderCatMapping();renderAll();});});
+  tbody.querySelectorAll('.cat-map-reset').forEach(b=>{b.addEventListener('click',e=>{delete S.catMap[e.target.dataset.cat];saveJSON(STORAGE_KEYS.cat,S.catMap);renderCatMapping();renderAll();});});
+}
+
+// ── ACCOUNT UI ──
+function renderAccMapping(){
+  const tbody=document.getElementById('accMapBody');
+  const as=new Map();S.rawRows.forEach(r=>{const a=pickVal(r,'Konto')||pickVal(r,'account')||pickVal(r,'Kontobezeichnung')||'';if(a)as.set(a,(as.get(a)||0)+1);});
+  S.uniqueAccs=[...as.entries()];
+  document.getElementById('accStats').textContent=`${S.uniqueAccs.length} Konten · ${Object.keys(S.accMap).length} zugeordnet`;
+  if(!S.uniqueAccs.length){tbody.innerHTML='<tr><td colspan="4" style="color:var(--muted)">Keine.</td></tr>';return;}
+  tbody.innerHTML=S.uniqueAccs.map(([acc,ct])=>{
+    const m=S.accMap[acc]||{};
+    return`<tr><td>${esc(acc)} <span style="color:var(--faint)">(${ct}×)</span></td><td><input type="text" class="acc-name-input" data-acc="${esc(acc)}" value="${esc(m.name||'')}" placeholder="GF-Name" style="min-height:34px;padding:.4rem .6rem;font-size:var(--text-sm)"></td><td><input type="text" class="acc-uuid-input" data-acc="${esc(acc)}" value="${esc(m.uuid||'')}" placeholder="UUID" style="min-height:34px;padding:.4rem .6rem;font-size:var(--text-sm)"></td><td>${m.name||m.uuid?`<button class="acc-map-reset" data-acc="${esc(acc)}">✕</button>`:''}</td></tr>`;
+  }).join('');
+  tbody.querySelectorAll('.acc-name-input').forEach(i=>{i.addEventListener('change',e=>{const a=e.target.dataset.acc;if(!S.accMap[a])S.accMap[a]={};S.accMap[a].name=e.target.value.trim()||undefined;if(!S.accMap[a].name&&!S.accMap[a].uuid)delete S.accMap[a];saveJSON(STORAGE_KEYS.acc,S.accMap);renderAccMapping();renderAll();});});
+  tbody.querySelectorAll('.acc-uuid-input').forEach(i=>{i.addEventListener('change',e=>{const a=e.target.dataset.acc;if(!S.accMap[a])S.accMap[a]={};S.accMap[a].uuid=e.target.value.trim()||undefined;if(!S.accMap[a].name&&!S.accMap[a].uuid)delete S.accMap[a];saveJSON(STORAGE_KEYS.acc,S.accMap);renderAccMapping();renderAll();});});
+  tbody.querySelectorAll('.acc-map-reset').forEach(b=>{b.addEventListener('click',e=>{delete S.accMap[e.target.dataset.acc];saveJSON(STORAGE_KEYS.acc,S.accMap);renderAccMapping();renderAll();});});
+}
+// ── PREVIEW / STATS / EXPORT INFO ──
+function renderPreview(rows){
+  if(!rows.length){el.previewBody.innerHTML='<tr><td colspan="8" style="color:var(--muted)">Keine Daten.</td></tr>';return;}
+  const dupSet=new Set();if(S.dupGroups.length)S.dupGroups.forEach(g=>g.indices.slice(1).forEach(i=>dupSet.add(i)));
+  el.previewBody.innerHTML=rows.slice(0,200).map(r=>{
+    const isD=dupSet.has(r._rawIdx);
+    return`<tr class="${isD?'dup-row-highlight':''}"><td>${r.idx}${isD?' <span class="dup-badge">DUP</span>':''}</td><td>${esc(r.date)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${r.amount!=null?esc(fmt(r.amount)):''}</td><td class="wrap" title="${esc(r.rawPayee||r.payee)}"><span class="payee-clean">${esc(r.payee)}</span>${r.rawPayee&&r.rawPayee!==r.payee?`<span class="payee-original"> (${esc(r.rawPayee)})</span>`:''}</td><td>${esc(r.category)}</td><td>${pillType(r.gfType)}</td><td class="mono">${esc(r.symbol||'')}</td><td>${esc(r.accountName||'')}</td></tr>`;
+  }).join('');
+}
+function renderStats(rows){
+  const amts=rows.map(r=>r.amount).filter(v=>typeof v==='number');
+  el.sRows.textContent=S.rawRows.length;el.sActual.textContent=rows.length;
+  el.sGhost.textContent=S.gfActivities.length;
+  el.sNet.textContent=fmt(amts.reduce((a,b)=>a+b,0));
+  el.sIn.textContent=fmt(amts.filter(v=>v>0).reduce((a,b)=>a+b,0));
+  el.sOut.textContent=fmt(amts.filter(v=>v<0).reduce((a,b)=>a+Math.abs(b),0));
+}
+function renderExportInfo(rows){
+  if(!rows.length){el.exportInfo.textContent='';return;}
+  const dates=rows.map(r=>r.date).filter(Boolean).sort();
+  const filtered=S.dupFilter?getDupFilteredRows():rows;
+  el.exportInfo.textContent=`${filtered.length} Transaktionen · Zeitraum: ${dates[0]||'—'} bis ${dates[dates.length-1]||'—'}${S.dupFilter?` (${rows.length-filtered.length} Duplikate ausgefiltert)`:''}`;
+}
+
+// ── MASTER RENDER ──
+function renderAll(){
+  if(!S.rawRows.length){renderPreview([]);renderStats([]);el.outActual.value='';el.outGhost.value='';el.outGhostCsv.value='';el.exportInfo.textContent='';el.btnSend.disabled=true;return;}
+  S.normalized=normalizeRows();
+  const exRows=S.dupFilter?getDupFilteredRows():S.normalized;
+  S.actualCsv=buildActualCsv(exRows);
+  S.gfActivities=buildGhostfolioActivities(exRows);
+  S.gfCsv=buildGhostfolioCsv(exRows);
+  el.outActual.value=S.actualCsv;
+  el.outGhost.value=JSON.stringify(buildGfExport(S.gfActivities),null,2);
+  el.outGhostCsv.value=S.gfCsv;
+  renderPreview(S.normalized);renderStats(exRows);renderExportInfo(S.normalized);
+  el.btnSend.disabled=false;
+}
+
+// ── FILE LOADING ──
+function loadText(text,label){
+  S.delimiter=detectDelimiter(text);
+  const{headers,rows}=parseDelimited(text,S.delimiter);
+  S.headers=headers;S.rawRows=rows;
+  buildMappingGrid(headers);
+  el.headerHint.textContent=`${headers.length} Spalten · Delimiter: ${S.delimiter==='\t'?'Tab':S.delimiter}`;
+  el.fileInfo.textContent=label||`${rows.length} Zeilen geladen`;
+  el.dupPanel.style.display='';el.payeePanel.style.display='';el.catPanel.style.display='';el.accPanel.style.display='';
+  detectDuplicates();renderDuplicates();
+  applyPreset();renderPayeeMapping();renderCatMapping();renderAccMapping();
+  renderAll();
+}
+el.dropZone.addEventListener('click',()=>el.file.click());
+el.dropZone.addEventListener('dragover',e=>{e.preventDefault();el.dropZone.style.borderColor='var(--primary)';});
+el.dropZone.addEventListener('dragleave',()=>{el.dropZone.style.borderColor='';});
+el.dropZone.addEventListener('drop',e=>{e.preventDefault();el.dropZone.style.borderColor='';if(e.dataTransfer.files.length)handleFile(e.dataTransfer.files[0]);});
+el.file.addEventListener('change',e=>{if(e.target.files.length)handleFile(e.target.files[0]);});
+function handleFile(file){const r=new FileReader();r.onload=e=>{loadText(e.target.result,`${file.name} · ${file.size.toLocaleString('de')} Byte`);};r.readAsText(file,'UTF-8');}
+
+// ── BUTTONS ──
+$('btnDemo').addEventListener('click',()=>{if(!el.accountLabel.value)el.accountLabel.value='DKB Girokonto';if(!el.actualAccount.value)el.actualAccount.value='Girokonto';loadText(DEMO,'Demodaten (25 Zeilen + Duplikate mit echten MM-Spalten)');});
+$('btnPreset').addEventListener('click',applyPreset);
+el.autoClean.addEventListener('change',()=>{S.autoClean=el.autoClean.checked;renderPayeeMapping();renderAll();});
+el.payeeSearch.addEventListener('input',()=>renderPayeeMapping());
+el.btnClearPayees.addEventListener('click',()=>{if(confirm('Alle Payee-Mappings löschen?')){S.payeeMap={};saveJSON(STORAGE_KEYS.payee,{});renderPayeeMapping();renderAll();}});
+el.btnCatBulkApply.addEventListener('click',()=>{const t=el.catBulkTarget.value.trim();if(!t)return;S.uniqueCats.forEach(([c])=>S.catMap[c]=t);saveJSON(STORAGE_KEYS.cat,S.catMap);renderCatMapping();renderAll();});
+el.btnCatBulkReset.addEventListener('click',()=>{if(confirm('Alle Kategorie-Mappings löschen?')){S.catMap={};saveJSON(STORAGE_KEYS.cat,{});renderCatMapping();renderAll();}});
+
+// ── MODE / OUTPUT TABS ──
+let currentMode='cash';
+document.querySelectorAll('[data-mode]').forEach(b=>{b.addEventListener('click',()=>{currentMode=b.dataset.mode;document.querySelectorAll('[data-mode]').forEach(x=>{x.classList.toggle('active',x===b);x.setAttribute('aria-selected',x===b);});document.querySelectorAll('.mode-pane').forEach(p=>p.classList.toggle('active',p.id===`mode-${currentMode}`));renderAll();});});
+document.querySelectorAll('[data-out]').forEach(b=>{b.addEventListener('click',()=>{document.querySelectorAll('[data-out]').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.out-pane').forEach(p=>p.classList.toggle('active',p.id===`out-${b.dataset.out}`));});});
+
+// ── THEME ──
+let theme=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
+document.documentElement.setAttribute('data-theme',theme);
+$('btnTheme').addEventListener('click',()=>{theme=theme==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',theme);$('btnTheme').textContent=theme==='dark'?'🌙':'☀️';});
+
+// ── TOAST ──
+let tt;function showToast(msg,err){const t=el.toast;t.textContent=msg;t.className='toast show'+(err?' error':'');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),2500);}
+
+// ── DOWNLOAD / COPY ──
+function dl(n,c,m){const b=new Blob([c],{type:m});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=n;a.click();URL.revokeObjectURL(a.href);}
+$('dlActual').addEventListener('click',()=>dl(`${slugify(el.actualAccount.value||'actual')}-actual.csv`,S.actualCsv,'text/csv;charset=utf-8'));
+$('dlGhost').addEventListener('click',()=>dl(`${slugify(el.accountLabel.value||'gf')}-ghostfolio.json`,JSON.stringify(buildGfExport(S.gfActivities),null,2),'application/json;charset=utf-8'));
+$('dlGhostCsv').addEventListener('click',()=>dl(`${slugify(el.accountLabel.value||'gf')}-ghostfolio.csv`,S.gfCsv,'text/csv;charset=utf-8'));
+$('cpActual').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(S.actualCsv);showToast('✅ Kopiert.');}catch{showToast('Fehlgeschlagen.',true);}});
+$('cpGhost').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(JSON.stringify(buildGfExport(S.gfActivities),null,2));showToast('✅ Kopiert.');}catch{showToast('Fehlgeschlagen.',true);}});
+$('cpGhostCsv').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(S.gfCsv);showToast('✅ Kopiert.');}catch{showToast('Fehlgeschlagen.',true);}});
+$('cpPayload').addEventListener('click',async()=>{const p=el.apiPayload.value==='wrap'?buildGfExport(S.gfActivities):S.gfActivities;try{await navigator.clipboard.writeText(JSON.stringify(p,null,2));showToast('✅ Kopiert.');}catch{showToast('Fehlgeschlagen.',true);}});
+
+// ── API SEND (retry + batch) ──
+$('btnSend').addEventListener('click',async()=>{
+  const acts=S.gfActivities;if(!acts.length){showToast('Keine Daten.',true);return;}
+  const bs=parseInt(el.apiBatchSize.value)||50;const totalB=Math.ceil(acts.length/bs);
+  el.apiStatus.textContent=`Sende ${acts.length} in ${totalB} Batches...`;el.btnSend.disabled=true;
+  let sent=0,failed=0;
+  const h={'Content-Type':'application/json'};if(el.apiToken.value.trim())h.Authorization=`Bearer ${el.apiToken.value.trim()}`;
+  for(let i=0;i<acts.length;i+=bs){
+    const batch=acts.slice(i,i+bs);const payload=el.apiPayload.value==='wrap'?buildGfExport(batch):batch;
+    let ok=false;
+    for(let retry=0;retry<3;retry++){
+      try{const r=await fetch(el.apiUrl.value.trim(),{method:el.apiMethod.value,headers:h,body:JSON.stringify(payload)});if(r.ok){sent+=batch.length;ok=true;break;}if(r.status<500)break;}catch(e){if(retry===2)break;await new Promise(r=>setTimeout(r,1000*(retry+1)));}
+    }
+    if(!ok)failed+=batch.length;
+    el.apiStatus.textContent=`Batch ${Math.floor(i/bs)+1}/${totalB} · ${sent} OK, ${failed} Fehler`;
+  }
+  el.btnSend.disabled=false;el.apiStatus.textContent=failed===0?`✅ Alle ${sent} gesendet.`:`⚠️ ${sent} OK, ${failed} Fehler.`;
+});
+
+// ── REACTIVE ──
+document.addEventListener('change',e=>{if(e.target.matches('[data-map],#dateFmt,#delimFmt,#defCurrency,#cashTypePos,#cashTypeNeg,#cashSymbol,#cashInvert,#secType,#secDataSource,#secQtyFallback,#secPriceFallback'))renderAll();});
+document.addEventListener('input',e=>{if(e.target.matches('#accountLabel,#actualAccount,#ghostAccountId,#defCurrency'))renderAll();});
+
+// ── API TEST ──
+if(el.btnApiTest){el.btnApiTest.addEventListener('click',async function(){
+  el.btnApiTest.disabled=true;
+  el.apiDot.className='api-dot chk';
+  el.apiStatusText.textContent='Teste Verbindung...';
+  el.apiStatusText.className='status-line';
+  var url=el.apiUrl.value.trim();
+  if(!url){el.apiDot.className='api-dot off';el.apiStatusText.textContent='Keine URL';el.apiStatusText.className='status-line status-err';el.btnApiTest.disabled=false;return;}
+  var h={'Content-Type':'application/json'};
+  if(el.apiToken.value.trim())h.Authorization='Bearer '+el.apiToken.value.trim();
+  try{
+    var r=await fetch(url.replace('/import','/ping').replace('/v1/','/v1/')||url,{method:'GET',headers:h,mode:'cors'});
+    if(r.ok||r.status===404||r.status===405){
+      el.apiDot.className='api-dot on';
+      el.apiStatusText.textContent='✅ Verbunden ('+r.status+')';
+      el.apiStatusText.className='status-line status-ok';
+    }else{
+      el.apiDot.className='api-dot off';
+      el.apiStatusText.textContent='❌ HTTP '+r.status;
+      el.apiStatusText.className='status-line status-err';
+    }
+  }catch(e){
+    el.apiDot.className='api-dot off';
+    el.apiStatusText.textContent='❌ Fehler: '+e.message;
+    el.apiStatusText.className='status-line status-err';
+    showToast('API-Test fehlgeschlagen: '+e.message,true);
+  }
+  el.btnApiTest.disabled=false;
+});}
+
+// ── GUIDE TOGGLE ──
+if(el.btnGuide){el.btnGuide.addEventListener('click',function(){el.guidePanel.classList.toggle('hidden');});}
+if(el.btnCloseGuide){el.btnCloseGuide.addEventListener('click',function(){el.guidePanel.classList.add('hidden');});}
+
+
+// ── INIT ──
+loadJSON(STORAGE_KEYS.payee,{});loadJSON(STORAGE_KEYS.cat,{});loadJSON(STORAGE_KEYS.acc,{});
+buildMappingGrid();renderAll();
+</script>
+</body>
+</html>
+
+</script>
+</body>
+</html>
