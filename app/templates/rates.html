@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Stromtarife</h1>
+
+<div class="card">
+    <h3>Neuen Tarif anlegen</h3>
+    <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="add">
+        <div class="form-group">
+            <label>Bezeichnung</label>
+            <input type="text" name="label" placeholder="z.B. Grundversorgung 2024">
+        </div>
+        <div class="form-group">
+            <label>Von</label>
+            <input type="date" name="start_date" required>
+        </div>
+        <div class="form-group">
+            <label>Bis</label>
+            <input type="date" name="end_date" required>
+        </div>
+        <div class="form-group">
+            <label>Arbeitspreis (ct/kWh)</label>
+            <input type="number" name="price_per_kwh" step="0.0001" placeholder="25.38" required>
+        </div>
+        <div class="form-group">
+            <label>Grundgebühr (€/Monat)</label>
+            <input type="number" name="monthly_base_fee" step="0.01" placeholder="10.00" value="0">
+        </div>
+        <div class="form-group form-actions">
+            <button type="submit" class="btn btn-primary">Speichern</button>
+        </div>
+    </form>
+</div>
+
+{% if rates %}
+<div class="card">
+    <h3>Vorhandene Tarife</h3>
+    <table>
+        <thead>
+            <tr><th>Bezeichnung</th><th>Von</th><th>Bis</th><th>ct/kWh</th><th>Grundgeb.</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for r in rates %}
+            <tr>
+                <td>{{ r.label or '-' }}</td>
+                <td>{{ r.start_date.strftime('%d.%m.%Y') }}</td>
+                <td>{{ r.end_date.strftime('%d.%m.%Y') }}</td>
+                <td>{{ r.price_per_kwh }}</td>
+                <td>{{ r.monthly_base_fee }} €</td>
+                <td>
+                    <form method="post" style="display:inline">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="id" value="{{ r.id }}">
+                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Wirklich löschen?')">✕</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

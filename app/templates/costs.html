@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Kosten</h1>
+
+<div class="card">
+    <h3>Neue Kosten eingeben</h3>
+    <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="add">
+        <div class="form-group">
+            <label>Datum</label>
+            <input type="date" name="cost_date" required>
+        </div>
+        <div class="form-group">
+            <label>Betrag (€)</label>
+            <input type="number" name="amount" step="0.01" placeholder="0.00" required>
+        </div>
+        <div class="form-group">
+            <label>Kategorie</label>
+            <select name="category">
+                <option value="Anschaffung">Anschaffung PV-Anlage</option>
+                <option value="Erweiterung">Erweiterung</option>
+                <option value="Wartung">Wartung</option>
+                <option value="Versicherung">Versicherung</option>
+                <option value="Sonstiges">Sonstiges</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Beschreibung</label>
+            <input type="text" name="description" placeholder="optional">
+        </div>
+        <div class="form-group form-actions">
+            <button type="submit" class="btn btn-primary">Speichern</button>
+        </div>
+    </form>
+</div>
+
+{% if costs %}
+<div class="card">
+    <h3>Vorhandene Kosten</h3>
+    <table>
+        <thead>
+            <tr><th>Datum</th><th>Kategorie</th><th>Beschreibung</th><th>Betrag</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for c in costs %}
+            <tr>
+                <td>{{ c.cost_date.strftime('%d.%m.%Y') }}</td>
+                <td><span class="badge">{{ c.category }}</span></td>
+                <td>{{ c.description or '-' }}</td>
+                <td class="right negative">{{ "%.2f"|format(c.amount|float) }} €</td>
+                <td>
+                    <form method="post" style="display:inline">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="id" value="{{ c.id }}">
+                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Wirklich löschen?')">✕</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

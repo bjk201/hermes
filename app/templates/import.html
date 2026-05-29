@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>CSV-Import</h1>
+
+<div class="card">
+    <h3>Home Assistant Energy CSV hochladen</h3>
+    <p>Lade eine CSV-Datei pro Monat hoch. Die stündlichen Werte werden automatisch zu Tageswerten aggregiert.</p>
+    <form method="post" enctype="multipart/form-data" class="upload-form">
+        <input type="file" name="file" accept=".csv" required>
+        <button type="submit" class="btn btn-primary">Importieren</button>
+    </form>
+</div>
+
+{% if logs %}
+<div class="card">
+    <h3>Import-Protokoll</h3>
+    <table>
+        <thead>
+            <tr><th>Datei</th><th>Monat</th><th>Datensätze</th><th>Datum</th></tr>
+        </thead>
+        <tbody>
+            {% for l in logs %}
+            <tr>
+                <td>{{ l.filename }}</td>
+                <td>{{ l.year }}-{{ "%02d"|format(l.month) }}</td>
+                <td>{{ l.records_count }}</td>
+                <td>{{ l.imported_at.strftime('%d.%m.%Y %H:%M') }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>Dashboard</h1>
+
+{% if not months %}
+<div class="card card-info">
+    <h3>Willkommen! ☀️</h3>
+    <p>Noch keine Daten vorhanden. Importiere zuerst deine Home Assistant CSV-Daten.</p>
+    <a href="{{ url_for('import_csv_route') }}" class="btn btn-primary">→ Zum Import</a>
+</div>
+{% else %}
+
+<!-- KPI Cards -->
+<div class="kpi-grid">
+    <div class="kpi">
+        <span class="kpi-label">Gesamteinnahmen</span>
+        <span class="kpi-value positive">{{ "%.2f"|format(total_income) }} €</span>
+        <small>Einspeisung + Eigenverbrauch-Einsparung</small>
+    </div>
+    <div class="kpi">
+        <span class="kpi-label">Gesamtkosten</span>
+        <span class="kpi-value negative">{{ "%.2f"|format(total_cost) }} €</span>
+        <small>Strom + Grundgebühren + weitere Kosten</small>
+    </div>
+    <div class="kpi">
+        <span class="kpi-label">Saldo</span>
+        <span class="kpi-value {{ 'positive' if net_total >= 0 else 'negative' }}">
+            {{ "%+.2f"|format(net_total) }} €
+        </span>
+        <small>Gewinn / Verlust</small>
+    </div>
+    <div class="kpi">
+        <span class="kpi-label">Break-Even</span>
+        <span class="kpi-value">{{ break_even|default('Noch nicht erreicht', true) }}</span>
+        <small>Zeitraum</small>
+    </div>
+</div>
+
+<!-- Amortisation Chart -->
+<div class="card">
+    <h3>Amortisation (kumuliert)</h3>
+    <div class="chart-container">
+        <canvas id="amortChart"></canvas>
+    </div>
+</div>
+
+<!-- Monatsübersicht Tabelle -->
+<div class="card">
+    <h3>Monatsübersicht</h3>
+    <div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>Monat</th>
+                <th class="right">Tage</th>
+                <th class="right">Prod. kWh</th>
+                <th class="right">Verbr. kWh</th>
+                <th class="right">Einsp. kWh</th>
+                <th class="right">Eigenverbr.</th>
+                <th class="right">Vergütung</th>
+                <th class="right">Einsparung</th>
+                <th class="right">Einnahmen</th>
+                <th class="right">Entnahme-€</th>
+                <th class="right">Grundgeb.</th>
+                <th class="right">Kosten</th>
+                <th class="right">Saldo</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in months %}
+            <tr>
+                <td><strong>{{ m.label }}</strong></td>
+                <td class="right">{{ m.days }}</td>
+                <td class="right">{{ "%.1f"|format(m.pv_production_kwh) }}</td>
+                <td class="right">{{ "%.1f"|format(m.consumption_kwh) }}</td>
+                <td class="right">{{ "%.1f"|format(m.grid_return_kwh) }}</td>
+                <td class="right">{{ "%.1f"|format(m.consumed_solar_kwh) }}</td>
+                <td class="right positive">{{ "%.2f"|format(m.feedin_earned) }} €</td>
+                <td class="right positive">{{ "%.2f"|format(m.savings) }} €</td>
+                <td class="right positive"><strong>{{ "%.2f"|format(m.income) }} €</strong></td>
+                <td class="right negative">{{ "%.2f"|format(m.grid_cost) }} €</td>
+                <td class="right">{{ "%.2f"|format(m.base_fee) }} €</td>
+                <td class="right negative">{{ "%.2f"|format(m.total_costs) }} €</td>
+                <td class="right {{ 'positive' if m.net >= 0 else 'negative' }}">
+                    <strong>{{ "%+.2f"|format(m.net) }} €</strong>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<script>
+const labels = {{ month_labels|tojson }};
+const dataIncome = {{ cumulative_income|tojson }};
+const dataCost = {{ cumulative_cost|tojson }};
+const dataNet = {{ cumulative_net|tojson }};
+
+new Chart(document.getElementById('amortChart'), {
+    type: 'line',
+    data: {
+        labels: labels,
+        datasets: [
+            {
+                label: 'Kumulierte Einnahmen (€)',
+                data: dataIncome,
+                borderColor: '#22c55e',
+                backgroundColor: 'rgba(34,197,94,0.1)',
+                fill: true,
+                tension: 0.3
+            },
+            {
+                label: 'Kumulierte Kosten (€)',
+                data: dataCost,
+                borderColor: '#ef4444',
+                backgroundColor: 'rgba(239,68,68,0.1)',
+                fill: true,
+                tension: 0.3
+            },
+            {
+                label: 'Netto-Saldo (€)',
+                data: dataNet,
+                borderColor: '#3b82f6',
+                backgroundColor: 'transparent',
+                borderDash: [5, 5],
+                tension: 0.3,
+                pointRadius: 3
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: { labels: { color: '#e2e8f0' } },
+            tooltip: {
+                callbacks: {
+                    label: function(ctx) {
+                        return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(2) + ' €';
+                    }
+                }
+            }
+        },
+        scales: {
+            x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+            y: {
+                ticks: {
+                    color: '#94a3b8',
+                    callback: v => v.toFixed(0) + ' €'
+                },
+                grid: { color: '#334155' }
+            }
+        }
+    }
+});
+</script>
+
+{% endif %}
+
+{% if recent_imports %}
+<div class="card">
+    <h3>Letzte Importe</h3>
+    <table>
+        <tr><th>Datei</th><th>Monat</th><th>Datensätze</th><th>Importiert am</th></tr>
+        {% for l in recent_imports %}
+        <tr>
+            <td>{{ l.filename }}</td>
+            <td>{{ l.year }}-{{ "%02d"|format(l.month) }}</td>
+            <td>{{ l.records_count }}</td>
+            <td>{{ l.imported_at.strftime('%d.%m.%Y %H:%M') }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}
