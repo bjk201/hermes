@@ -127,9 +127,156 @@ class ImportLog(db.Model):
     month = db.Column(db.Integer)
     imported_at = db.Column(db.DateTime, default=datetime.utcnow)
     records_count = db.Column(db.Integer)
+    source = db.Column(db.String(50), default="csv")  # "csv" or "ha_api"
 
 
-# ── CSV Parser ────────────────────────────────────────────────────────────────
+class Settings(db.Model):
+    """Key-Value Store für HA-Konfiguration."""
+    __tablename__ = "settings"
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    value = db.Column(db.Text, default="")
+
+    @staticmethod
+    def get(key, default=""):
+        rec = Settings.query.filter_by(key=key).first()
+        return rec.value if rec else default
+
+    @staticmethod
+    def set(key, value):
+        rec = Settings.query.filter_by(key=key).first()
+        if rec:
+            rec.value = value
+        else:
+            db.session.add(Settings(key=key, value=value))
+        db.session.commit()
+
+
+# ── HA Settings Helper ────────────────────────────────────────────────────────
+
+def get_ha_settings() -> dict:
+    """Gibt alle HA-relevanten Settings als dict zurück."""
+    keys = [
+        "ha_url", "ha_token",
+        "ha_sensor_pv_production",
+        "ha_sensor_battery_in", "ha_sensor_battery_out",
+        "ha_sensor_grid_to_house", "ha_sensor_consumed_solar",
+        "ha_sensor_consumption", "ha_sensor_solar_to_battery",
+        "ha_sensor_solar_to_grid", "ha_sensor_battery_usage",
+    ]
+    return {k: Settings.get(k, "") for k in keys}
+
+
+# ── HA API Client ─────────────────────────────────────────────────────────────
+
+import urllib.request
+import urllib.error
+import json as _json
+
+# HA History API: aggregiert einen Tag (Start → End, 00:00–23:59)
+# Wir nutzen /api/history/period/{start} mit filter_entity_id + minimal_response
+
+_HA_SENSOR_FIELDS: dict[str, str] = {
+    "ha_sensor_pv_production":    "pv_production_kwh",
+    "ha_sensor_battery_in":       "battery_in_kwh",
+    "ha_sensor_battery_out":      "battery_out_kwh",
+    "ha_sensor_grid_to_house":    "grid_to_house_kwh",
+    "ha_sensor_consumed_solar":   "consumed_solar_kwh",
+    "ha_sensor_consumption":      "consumption_kwh",
+    "ha_sensor_solar_to_battery": "solar_to_battery_kwh",
+    "ha_sensor_solar_to_grid":    "solar_to_grid_kwh",
+    "ha_sensor_battery_usage":    "battery_usage_kwh",
+}
+
+
+def ha_api_fetch_day(target_date: date, settings: dict) -> dict | None:
+    """
+    Ruft die HA History API für einen Tag ab.
+    Gibt dict[db_field, float] oder None bei Fehler zurück.
+    """
+    ha_url = settings.get("ha_url", "").rstrip("/")
+    ha_token = settings.get("ha_token", "")
+    if not ha_url or not ha_token:
+        log.warning("HA URL oder Token nicht konfiguriert.")
+        return None
+
+    # Zeitraum: 00:00:00 → 23:59:59 des target_date (UTC ISO Format)
+    start_dt = datetime.combine(target_date, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S")
+    end_dt   = datetime.combine(target_date, datetime.max.time()).strftime("%Y-%m-%dT%H:%M:%S")
+
+    result: dict[str, float] = {}
+
+    for setting_key, db_field in _HA_SENSOR_FIELDS.items():
+        entity_id = settings.get(setting_key, "").strip()
+        if not entity_id:
+            continue
+
+        url = (
+            f"{ha_url}/api/history/period/{start_dt}"
+            f"?filter_entity_id={entity_id}"
+            f"&minimal_response"
+            f"&significant_changes_only=0"
+            f"&end_time={end_dt}"
+        )
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {ha_token}",
+            "Content-Type": "application/json",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = _json.loads(resp.read().decode())
+            # data = [[{state, last_changed, ...}, ...]]
+            entries = data[0] if data else []
+            if len(entries) >= 2:
+                # Differenz letzter → erster Wert des Tages = Verbrauch/Produktion
+                try:
+                    first_val = float(entries[0].get("state", 0))
+                except (ValueError, TypeError):
+                    first_val = 0.0
+                try:
+                    last_val  = float(entries[-1].get("state", 0))
+                except (ValueError, TypeError):
+                    last_val = 0.0
+                diff = last_val - first_val
+                if diff < 0:
+                    diff = 0.0  # Counter-Reset o.ä.
+                result[db_field] = round(diff, 4)
+        except Exception as exc:
+            log.warning("HA API Fehler für %s: %s", entity_id, exc)
+
+    return result if result else None
+
+
+def ha_import_day(target_date: date) -> tuple[int, str]:
+    """
+    Importiert Daten eines Tages von HA → daily_energy.
+    Gibt (0, error_msg) oder (1, success_msg) zurück.
+    """
+    settings = get_ha_settings()
+    if not settings.get("ha_url"):
+        return 0, "HA URL nicht konfiguriert."
+
+    data = ha_api_fetch_day(target_date, settings)
+    if not data:
+        return 0, f"Keine Daten von HA für {target_date} erhalten."
+
+    rec = DailyEnergy.query.filter_by(day=target_date).first()
+    if rec:
+        for k, v in data.items():
+            setattr(rec, k, v)
+    else:
+        rec = DailyEnergy(day=target_date, **data)
+        db.session.add(rec)
+
+    db.session.add(ImportLog(
+        filename=f"HA-API-{target_date}",
+        year=target_date.year,
+        month=target_date.month,
+        records_count=1,
+        source="ha_api",
+    ))
+    db.session.commit()
+    return 1, f"✓ {target_date}: {len(data)} Werte importiert."
 
 def _parse_date_header(header):
     """Erkennt Datumsspalten. Gibt [(col_idx, date, hour), ...] zurück."""
@@ -532,6 +679,76 @@ def costs():
         "costs.html",
         costs=ManualCost.query.order_by(ManualCost.cost_date.desc()).all()
     )
+
+
+# ── HA Settings ───────────────────────────────────────────────────────────────
+
+@app.route("/settings", methods=["GET", "POST"])
+def settings_route():
+    if request.method == "POST":
+        # HA Connection
+        Settings.set("ha_url", request.form.get("ha_url", "").strip().rstrip("/"))
+        token_val = request.form.get("ha_token", "").strip()
+        if token_val:
+            Settings.set("ha_token", token_val)
+        # Sensors
+        sensor_keys = [
+            "ha_sensor_pv_production",
+            "ha_sensor_battery_in", "ha_sensor_battery_out",
+            "ha_sensor_grid_to_house", "ha_sensor_consumed_solar",
+            "ha_sensor_consumption", "ha_sensor_solar_to_battery",
+            "ha_sensor_solar_to_grid", "ha_sensor_battery_usage",
+        ]
+        for key in sensor_keys:
+            Settings.set(key, request.form.get(key, "").strip())
+        flash("Einstellungen gespeichert!", "success")
+        return redirect(url_for("settings_route"))
+
+    ha = get_ha_settings()
+    return render_template("settings.html", ha=ha)
+
+
+# ── HA Import API ─────────────────────────────────────────────────────────────
+
+@app.route("/api/ha-import", methods=["POST"])
+def ha_import_api():
+    """Importiert Daten von HA. Query-Param: date=YYYY-MM-DD (default: gestern)."""
+    date_str = request.args.get("date", "")
+    if date_str:
+        try:
+            target = date.fromisoformat(date_str)
+        except ValueError:
+            return jsonify({"error": "Ungültiges Datum"}), 400
+    else:
+        from datetime import timedelta
+        target = date.today() - timedelta(days=1)
+
+    count, msg = ha_import_day(target)
+    if count:
+        return jsonify({"ok": True, "date": str(target), "message": msg})
+    return jsonify({"ok": False, "error": msg}), 400
+
+
+@app.route("/api/ha-test", methods=["POST"])
+def ha_test_api():
+    """Testet die HA-Verbindung."""
+    settings = get_ha_settings()
+    url = settings.get("ha_url", "")
+    token = settings.get("ha_token", "")
+    if not url or not token:
+        return jsonify({"ok": False, "error": "HA URL oder Token fehlt."}), 400
+
+    test_url = f"{url}/api/"
+    req = urllib.request.Request(test_url, headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read().decode())
+        return jsonify({"ok": True, "ha_message": data.get("message", "OK")})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 
 # ── Entry Point ───────────────────────────────────────────────────────────────

@@ -6,8 +6,9 @@
 {% if not months %}
 <div class="card card-info">
     <h3>Willkommen! ☀️</h3>
-    <p>Noch keine Daten vorhanden. Importiere zuerst deine Home Assistant CSV-Daten.</p>
-    <a href="{{ url_for('import_csv_route') }}" class="btn btn-primary">→ Zum Import</a>
+    <p>Noch keine Daten vorhanden. Importiere zuerst deine Home Assistant CSV-Daten oder richte den HA-API-Import ein.</p>
+    <a href="{{ url_for('import_csv_route') }}" class="btn btn-primary">→ Zum CSV-Import</a>
+    <a href="{{ url_for('settings_route') }}" class="btn btn-secondary">→ HA-API einrichten</a>
 </div>
 {% else %}
 
@@ -35,6 +36,19 @@
         <span class="kpi-value">{{ break_even|default('Noch nicht erreicht', true) }}</span>
         <small>Zeitraum</small>
     </div>
+</div>
+
+<!-- HA Import Action -->
+<div class="card ha-import-card">
+    <h3>☁️ Home Assistant Import</h3>
+    <p>Daten direkt von HA abrufen – kein CSV-Upload nötig.</p>
+    <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="haImportYesterday()">
+            📥 Gestern von HA importieren
+        </button>
+        <a href="{{ url_for('settings_route') }}" class="btn btn-link">⚙️ HA-Einstellungen</a>
+    </div>
+    <span id="haImportResult" style="margin-left:8px;"></span>
 </div>
 
 <!-- Amortisation Chart -->
@@ -156,6 +170,28 @@ new Chart(document.getElementById('amortChart'), {
         }
     }
 });
+
+async function haImportYesterday() {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    const dateStr = d.toISOString().slice(0, 10);
+    const resEl = document.getElementById('haImportResult');
+    resEl.textContent = '⏳ Importiere...';
+    try {
+        const resp = await fetch('/api/ha-import?date=' + dateStr, { method: 'POST' });
+        const data = await resp.json();
+        if (data.ok) {
+            resEl.innerHTML = '✅ ' + (data.message || 'OK');
+            resEl.style.color = '#2e7d32';
+        } else {
+            resEl.innerHTML = '❌ ' + (data.error || 'Fehler') + ' → <a href="/settings">Einstellungen prüfen</a>';
+            resEl.style.color = '#c62828';
+        }
+    } catch (e) {
+        resEl.innerHTML = '❌ Netzwerkfehler: ' + e;
+        resEl.style.color = '#c62828';
+    }
+}
 </script>
 
 {% endif %}
@@ -164,9 +200,10 @@ new Chart(document.getElementById('amortChart'), {
 <div class="card">
     <h3>Letzte Importe</h3>
     <table>
-        <tr><th>Datei</th><th>Monat</th><th>Datensätze</th><th>Importiert am</th></tr>
+        <tr><th>Quelle</th><th>Datei/Tag</th><th>Monat</th><th>Datensätze</th><th>Importiert am</th></tr>
         {% for l in recent_imports %}
         <tr>
+            <td>{{ "☁️ HA-API" if l.source == "ha_api" else "📄 CSV" }}</td>
             <td>{{ l.filename }}</td>
             <td>{{ l.year }}-{{ "%02d"|format(l.month) }}</td>
             <td>{{ l.records_count }}</td>

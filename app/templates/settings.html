@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% set title = "HA-Einstellungen" %}
+{% block content %}
+<h1>⚙️ Home Assistant Einstellungen</h1>
+
+<form method="POST" id="settingsForm">
+    <section class="settings-section">
+        <h2>HA-Verbindung</h2>
+        <div class="form-row">
+            <label for="ha_url">HA URL</label>
+            <input type="url" id="ha_url" name="ha_url"
+                   value="{{ ha.get('ha_url', '') }}"
+                   placeholder="https://192.168.1.100:8123" class="form-control">
+        </div>
+        <div class="form-row">
+            <label for="ha_token">Long-Lived Access Token</label>
+            <input type="password" id="ha_token" name="ha_token"
+                   placeholder="eyJ0eXpliI1NiJ9..." class="form-control">
+            <small>Token bei HA → Profil → Sicherheit → Long-Lived Access Tokens erstellen</small>
+        </div>
+        <div class="form-actions">
+            <button type="button" id="btnTestConn" class="btn btn-secondary" onclick="testConnection()">
+                🔌 Verbindung testen
+            </button>
+            <span id="testResult"></span>
+        </div>
+    </section>
+
+    <section class="settings-section">
+        <h2>Sensor-Mapping</h2>
+        <p class="hint">HA Entity-IDs für jeden Datenfeld. Nur Sensoren ausfüllen, die du brauchst.</p>
+        {% set sensors = [
+            ("ha_sensor_pv_production",    "PV-Produktion",         "sensor.sma_wechselrichter_yield"),
+            ("ha_sensor_battery_in",       "Batterie Laden (kWh)",   "sensor.battery_in"),
+            ("ha_sensor_battery_out",      "Batterie Entladen (kWh)","sensor.battery_out"),
+            ("ha_sensor_grid_to_house",    "Netz → Haus (kWh)",     "sensor.grid_consumption"),
+            ("ha_sensor_consumed_solar",   "Eigenverbrauch (kWh)",  "sensor.solar_consumed"),
+            ("ha_sensor_consumption",      "Gesamtverbrauch (kWh)", "sensor.total_consumption"),
+            ("ha_sensor_solar_to_battery", "Solar → Batterie (kWh)","sensor.solar_to_battery"),
+            ("ha_sensor_solar_to_grid",    "Solar → Netz (kWh)",    "sensor.solar_to_grid"),
+            ("ha_sensor_battery_usage",    "Batterie-Verbrauch (kWh)","sensor.battery_consumed"),
+        ] %}
+        {% for key, label, placeholder in sensors %}
+        <div class="form-row sensor-row">
+            <label for="{{ key }}">{{ label }}</label>
+            <input type="text" id="{{ key }}" name="{{ key }}"
+                   value="{{ ha.get(key, '') }}"
+                   placeholder="{{ placeholder }}" class="form-control">
+        </div>
+        {% endfor %}
+    </section>
+
+    <section class="settings-section" id="importActions">
+        <h2>Import</h2>
+        <div class="form-actions">
+            <button type="button" id="btnImportYesterday" class="btn btn-secondary" onclick="importYesterday()">
+                📥 Gestern importieren
+            </button>
+            <button type="button" id="btnImportToday" class="btn btn-secondary" onclick="importToday()">
+                📥 Vortag importieren (manuell)
+            </button>
+            <span id="importResult"></span>
+        </div>
+        <div class="hint" style="margin-top:8px;">
+            Für automatischen täglichen Import: Cron-Job einrichten.<br>
+            <code>curl -X POST http://LXC-IP:8080/api/ha-import?date=YYYY-MM-DD</code><br>
+            Oder ohne Parameter = automatisch gestern.
+        </div>
+    </section>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">💾 Einstellungen speichern</button>
+    </div>
+</form>
+
+<script>
+async function testConnection() {
+    const url = document.getElementById('ha_url').value.trim();
+    const token = document.getElementById('ha_token').value.trim();
+    const resEl = document.getElementById('testResult');
+    resEl.textContent = '⏳ Teste...';
+
+    // Temporär URL + Token als hidden fields im Form speichern, dann POST
+    let form = new FormData(document.getElementById('settingsForm'));
+
+    const resp = await fetch('/api/ha-test', { method: 'POST', body: form });
+    const data = await resp.json();
+    if (data.ok) {
+        resEl.innerHTML = '✅ <strong>Verbunden:</strong> ' + (data.ha_message || 'OK');
+        resEl.style.color = '#2e7d32';
+    } else {
+        resEl.innerHTML = '❌ <strong>Fehler:</strong> ' + (data.error || 'Unbekannt');
+        resEl.style.color = '#c62828';
+    }
+}
+
+async function importDate(dateStr) {
+    const resEl = document.getElementById('importResult');
+    resEl.textContent = '⏳ Importiere...';
+    let form = new FormData(document.getElementById('settingsForm'));
+    const resp = await fetch('/api/ha-import' + (dateStr ? '?date=' + dateStr : ''), {
+        method: 'POST',
+        body: form
+    });
+    const data = await resp.json();
+    if (data.ok) {
+        resEl.innerHTML = '✅ ' + (data.message || 'OK');
+        resEl.style.color = '#2e7d32';
+    } else {
+        resEl.innerHTML = '❌ ' + (data.error || 'Fehler');
+        resEl.style.color = '#c62828';
+    }
+}
+
+function importYesterday() {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    const dateStr = d.toISOString().slice(0, 10);
+    importDate(dateStr);
+}
+
+function importToday() {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    const dateStr = prompt('Datum importieren (YYYY-MM-DD):', d.toISOString().slice(0, 10));
+    if (dateStr) importDate(dateStr);
+}
+</script>
+{% endblock %}
