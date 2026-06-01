@@ -1,78 +1,100 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════
-# PV-Amortisations-Rechner Deployment-Skript
-# 
+# PV-Amortisations-Rechner Deployment-Skript (ohne Git)
+#
 # Voraussetzungen:
 # - Alpine Linux mit Docker + Portainer
-# - LXC muss Zugriff auf die Dateien haben
+# - wget oder curl installiert
 #
 # Usage:
-#   1. Dieses Skript auf dem Server ausführen
-#   2. In Portainer → Stacks → Add Stack → web_upload → docker-compose.yml hochladen
-#   3. Stack "pv-rechner" deployen
+#   1. Skript auf Server kopieren
+#   2. chmod +x deploy.sh && ./deploy.sh
 # ═══════════════════════════════════════════════════════════════
 
 set -e
 
 echo "=== PV-Amortisations-Rechner Deployment ==="
 
-# ── 1. Verzeichnis anlegen ──
 DEPLOY_DIR="/opt/pv-rechner"
 mkdir -p "$DEPLOY_DIR"
 cd "$DEPLOY_DIR"
 
-# ── 2. Code von GitHub ziehen ──
-if [ -d ".git" ]; then
-    echo "→ Aktualisiere bestehendes Repo..."
-    git pull origin feature/pv-rechner
-else
-    echo "→ Clone Repository..."
-    git clone https://github.com/bjk201/hermes.git .
-    git checkout feature/pv-rechner
+# ── 1. Code als ZIP von GitHub laden ──
+echo "→ Lade Code von GitHub herunter..."
+
+# Bereinige altes Verzeichnis (außer .env)
+if [ -d "app" ]; then
+    echo "→ Entferne alten Code..."
+    find . -maxdepth 1 ! -name ".env" ! -name "." -exec rm -rf {} +
 fi
 
-# ── 3. .env Datei erstellen (falls nicht vorhanden) ──
+# ZIP herunterladen (codeload funktioniert ohne Git)
+wget -q "https://codeload.github.com/bjk201/hermes/zip/refs/heads/feature/pv-rechner" -O code.zip
+# oder: curl -L -o code.zip "https://codeload.github.com/bjk201/hermes/zip/refs/heads/feature/pv-rechner"
+
+# Entpacken
+unzip -q -o code.zip
+# Entpacktes Verzeichnis: hermes-feature-pv-rechner/
+mv hermes-feature-pv-rechner/* .
+rm -rf hermes-feature-pv-rechner code.zip
+rm -f deploy.sh  # Eigenes Skript aufräumen
+
+echo "→ Code erfolgreich geladen."
+
+# ── 2. .env Datei erstellen (falls nicht vorhanden) ──
 if [ ! -f ".env" ]; then
     echo "→ Erstelle .env Datei..."
-    cat > .env << 'ENVEOF'
+
+    # Zufällige Passwörter generieren (Alpine-kompatibel)
+    DB_PASS=$(head -c 16 /dev/urandom | xxd -p 2>/dev/null || openssl rand -hex 12)
+    SECRET_KEY=$(head -c 32 /dev/urandom | xxd -p 2>/dev/null || openssl rand -hex 32)
+
+    cat > .env << ENVEOF
 POSTGRES_DB=pvrechner
 POSTGRES_USER=pvuser
-POSTGRES_PASSWORD=PVDB_$(openssl rand -hex 12)
+POSTGRES_PASSWORD=CHANGE_ME_PLEASE_set-a-strong-password)
 APP_PASSWORD=pv2024
-SECRET_KEY=$(openssl rand -hex 32)
+SECRET_KEY=CHANGE_ME_PLEASE_eep-this-secret)
 APP_PORT=3333
 ENVEOF
 
     echo ""
     echo "⚠️  WICHTIG: Passe die .env Datei an!"
-    echo "   nano .env"
+    echo "   vi .env"
     echo ""
     echo "   Mindestens ändern:"
-    echo "   - APP_PASSWORD  (dein Login-Passwort für die Webapp)"
     echo "   - POSTGRES_PASSWORD  (DB-Passwort)"
+    echo "   - APP_PASSWORD       (Login-Passwort für die Webapp)"
+    echo "   - SECRET_KEY         (beliebiger langer String)"
     echo ""
 fi
 
-# ── 4. .dockerignore erstellen ──
-cat > .dockerignore << 'DOCKERIGNORE'
-.git
-.gitignore
-.env.example
-*.md
-.dockerignore
-DOCKERIGNORE
+# ── 3. Docker Compose starten ──
+echo "→ Starte Docker Compose..."
+
+# Prüfe ob docker-compose oder docker compose
+if command -v docker-compose &> /dev/null; then
+    docker-compose up -d --build
+elif docker compose version &> /dev/null; then
+    docker compose up -d --build
+else
+    echo ""
+    echo "❌ Docker Compose nicht gefunden!"
+    echo "   Installiere es zuerst:"
+    echo "   apk add docker-compose"
+    echo "   ODER: Verwende Portainer Stack GUI"
+    echo ""
+fi
 
 echo ""
-echo "=== Deployment vorbereitet in $DEPLOY_DIR ==="
+echo "✅ Deployment abgeschlossen!"
 echo ""
-echo "Stack jetzt in Portainer starten:"
-echo "  1. Portainer öffnen → Stacks → Add Stack"
-echo "  2. Name: pv-rechner"
-echo "  3. Build method: Repository"
-echo "     - Repository URL: https://github.com/bjk201/hermes.git"
-echo "     - Branch: feature/pv-rechner"
-echo "  4. Environment variables: (aus .env)"
-echo "  5. Deploy the stack"
+echo "App erreichbar auf: http://$(hostname -I | awk '{print $1}'):3333"
+echo "Login mit APP_PASSWORD aus .env"
 echo ""
-echo "ODER lokal per Docker Compose:"
-echo "  cd $DEPLOY_DIR && docker-compose up -d --build"
+echo "Nach dem Login:"
+echo "  1. → HA-Einstellungen"
+echo "  2. HA URL: http://192.168.1.103:8123"
+echo "  3. Long-Lived Access Token eintragen"
+echo "  4. Sensor-Entity-IDs zuweisen"
+echo "  5. Verbindung testen ✓"
