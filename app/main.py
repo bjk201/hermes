@@ -15,7 +15,7 @@ from flask import (
     flash, session, jsonify
 )
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, extract, and_, create_engine
+from sqlalchemy import func, extract, and_
 from sqlalchemy.pool import NullPool
 
 logging.basicConfig(level=logging.INFO)
@@ -55,17 +55,13 @@ DB_HOST = os.environ.get("POSTGRES_HOST", "db")
 DB_PORT = os.environ.get("POSTGRES_PORT", "5432")
 DB_NAME = os.environ.get("POSTGRES_DB", "pvrechner")
 
-from sqlalchemy.pool import NullPool as _NP
-
-_db_engine = create_engine(
-    f"postgresql://{DB_USER}:***@{DB_HOST}:{DB_PORT}/{DB_NAME}",
-    poolclass=_NP,
-    connect_args={"connect_timeout": 15},
-)
-
 app.config["SQLALCHEMY_DATABASE_URI"] = (
-    f"postgresql://{DB_USER}:***@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "poolclass": NullPool,
+    "connect_args": {"connect_timeout": 15},
+}
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
@@ -81,7 +77,7 @@ def get_pw_hash():
     return _app_pw_hash
 
 
-db = SQLAlchemy(app, engine=_db_engine)
+db = SQLAlchemy(app)
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
