@@ -9,8 +9,6 @@ services:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-CHANGEME}"
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pvuser} -d ${POSTGRES_DB:-pvrechner}"]
       interval: 10s
@@ -19,9 +17,11 @@ services:
     restart: unless-stopped
 
   app:
-    build:
-      context: https://github.com/bjk201/hermes.git#feature/pv-rechner
-      dockerfile: Dockerfile
+    image: python:3.12-slim
+    working_dir: /app
+    command: bash -c "pip install -r requirements.txt && gunicorn --bind 0.0.0.0:5000 --workers 2 main:app"
+    volumes:
+      - ./pv-rechner-code/:/app:ro
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
