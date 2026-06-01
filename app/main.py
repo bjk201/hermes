@@ -15,7 +15,8 @@ from flask import (
     flash, session, jsonify
 )
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, extract, and_
+from sqlalchemy import func, extract, and_, create_engine
+from sqlalchemy.pool import NullPool
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("pvrechner")
@@ -46,12 +47,21 @@ CALCULATED_TYPE_TO_FIELD = {
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production-2026")
+app.config["DEBUG"] = os.environ.get("FLASK_DEBUG", "0") == "1"
 
 DB_USER = os.environ.get("POSTGRES_USER", "pvuser")
 DB_PASS = os.environ.get("POSTGRES_PASSWORD", "pvpass")
 DB_HOST = os.environ.get("POSTGRES_HOST", "db")
 DB_PORT = os.environ.get("POSTGRES_PORT", "5432")
 DB_NAME = os.environ.get("POSTGRES_DB", "pvrechner")
+
+from sqlalchemy.pool import NullPool as _NP
+
+_db_engine = create_engine(
+    f"postgresql://{DB_USER}:***@{DB_HOST}:{DB_PORT}/{DB_NAME}",
+    poolclass=_NP,
+    connect_args={"connect_timeout": 15},
+)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = (
     f"postgresql://{DB_USER}:***@{DB_HOST}:{DB_PORT}/{DB_NAME}"
@@ -71,7 +81,7 @@ def get_pw_hash():
     return _app_pw_hash
 
 
-db = SQLAlchemy(app)
+db = SQLAlchemy(app, engine=_db_engine)
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -950,9 +960,22 @@ def ha_import_range_api():
 
 if __name__ == "__main__":
     import sys
+    import time
+
+    app.config["DEBUG"] = True
+
     with app.app_context():
-        db.create_all()
-        log.info("DB ready.")
+        for attempt in range(10):
+            try:
+                db.create_all()
+                log.info("DB ready.")
+                break
+            except Exception as exc:
+                log.warning("DB not ready (attempt %d/10): %s", attempt + 1, exc)
+                time.sleep(3)
+        else:
+            log.error("DB not reachable after 10 attempts")
+            sys.exit(1)
     if "--init-db" in sys.argv:
         sys.exit(0)
     app.run(host="0.0.0.0", port=5000)

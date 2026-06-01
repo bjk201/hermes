@@ -18,7 +18,7 @@ services:
 
   app:
     build:
-      context: https://github.com/bjk201/hermes.git#feature/pv-rechner
+      context: .
       dockerfile: Dockerfile
     environment:
       POSTGRES_HOST: db
@@ -29,7 +29,7 @@ services:
       APP_PASSWORD: "${APP_PASSWORD:-pv2024}"
       SECRET_KEY: "${SECRET_KEY:-change-me-in-production-2026}"
     ports:
-      - "${APP_PORT:-3333}:5000"
+      - "${APP_PORT:-3334}:5000"
     depends_on:
       db:
         condition: service_healthy
