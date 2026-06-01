@@ -57,14 +57,40 @@
                 📥 Gestern importieren
             </button>
             <button type="button" id="btnImportToday" class="btn btn-secondary" onclick="importToday()">
-                📥 Vortag importieren (manuell)
+                📥 Beliebiges Datum
             </button>
             <span id="importResult"></span>
         </div>
         <div class="hint" style="margin-top:8px;">
             Für automatischen täglichen Import: Cron-Job einrichten.<br>
-            <code>curl -X POST http://LXC-IP:8080/api/ha-import?date=YYYY-MM-DD</code><br>
-            Oder ohne Parameter = automatisch gestern.
+            <code>curl -X POST http://LXC-IP:8080/api/ha-import</code><br>
+            (ohne Parameter = automatisch gestern)
+        </div>
+    </section>
+
+    <section class="settings-section" id="historyImport">
+        <h2>☁️ Komplette History importieren</h2>
+        <p class="hint">Importiert alle Sensordaten von einem Startdatum bis gestern. Bestehende Tage werden überschrieben.</p>
+        <div class="form-row sensor-row">
+            <label for="ha_history_first_date">Erster Tag (YYYY-MM-DD)</label>
+            <input type="date" id="ha_history_first_date" name="ha_history_first_date"
+                   value="{{ ha.get('ha_history_first_date', '') }}"
+                   placeholder="2024-01-01" class="form-control">
+        </div>
+        <div class="form-actions">
+            <button type="button" id="btnImportHistory" class="btn btn-secondary" onclick="importHistory()">
+                ☁️ History importieren (Start → gestern)
+            </button>
+            <button type="button" class="btn btn-link" onclick="importHistoryThisYear()">
+                📅 Dieses Jahr importieren
+            </button>
+            <span id="historyImportResult"></span>
+        </div>
+        <div id="historyProgress" class="progress-bar" style="display:none; margin-top:8px;">
+            <div class="progress-fill" style="width:0%"></div>
+        </div>
+        <div class="hint" style="margin-top:4px;">
+            Tipp: Erster Tag z.B. Installationsdatum der PV. Der Import kann bei >365 Tage einige Minuten dauern.
         </div>
     </section>
 
@@ -124,6 +150,42 @@ function importToday() {
     d.setDate(d.getDate() - 1);
     const dateStr = prompt('Datum importieren (YYYY-MM-DD):', d.toISOString().slice(0, 10));
     if (dateStr) importDate(dateStr);
+}
+
+async function importHistory() {
+    const firstDate = document.getElementById('ha_history_first_date').value;
+    if (!firstDate) {
+        alert('Bitte ein Startdatum (Erster Tag) angeben.');
+        return;
+    }
+    const resultEl = document.getElementById('historyImportResult');
+    const btn = document.getElementById('btnImportHistory');
+    btn.disabled = true;
+    btn.textContent = '⏳ Importiere – das kann etwas dauern...';
+    resultEl.textContent = '';
+    try {
+        const resp = await fetch('/api/ha-import-range?first=' + firstDate, { method: 'POST' });
+        const data = await resp.json();
+        if (data.ok) {
+            resultEl.innerHTML = '✅ <strong>' + data.message + '</strong>';
+            resultEl.style.color = '#2e7d32';
+        } else {
+            resultEl.innerHTML = '❌ ' + (data.error || 'Fehler');
+            resultEl.style.color = '#c62828';
+        }
+    } catch (e) {
+        resultEl.innerHTML = '❌ Fehler: ' + e;
+        resultEl.style.color = '#c62828';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '☁️ History importieren (Start → gestern)';
+    }
+}
+
+function importHistoryThisYear() {
+    const y = new Date().getFullYear();
+    document.getElementById('ha_history_first_date').value = y + '-01-01';
+    importHistory();
 }
 </script>
 {% endblock %}

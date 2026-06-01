@@ -163,6 +163,7 @@ def get_ha_settings() -> dict:
         "ha_sensor_grid_to_house", "ha_sensor_consumed_solar",
         "ha_sensor_consumption", "ha_sensor_solar_to_battery",
         "ha_sensor_solar_to_grid", "ha_sensor_battery_usage",
+        "ha_history_first_date",
     ]
     return {k: Settings.get(k, "") for k in keys}
 
@@ -200,7 +201,6 @@ def ha_api_fetch_day(target_date: date, settings: dict) -> dict | None:
         log.warning("HA URL oder Token nicht konfiguriert.")
         return None
 
-    # Zeitraum: 00:00:00 → 23:59:59 des target_date (UTC ISO Format)
     start_dt = datetime.combine(target_date, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S")
     end_dt   = datetime.combine(target_date, datetime.max.time()).strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -225,10 +225,8 @@ def ha_api_fetch_day(target_date: date, settings: dict) -> dict | None:
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = _json.loads(resp.read().decode())
-            # data = [[{state, last_changed, ...}, ...]]
             entries = data[0] if data else []
             if len(entries) >= 2:
-                # Differenz letzter → erster Wert des Tages = Verbrauch/Produktion
                 try:
                     first_val = float(entries[0].get("state", 0))
                 except (ValueError, TypeError):
@@ -239,12 +237,145 @@ def ha_api_fetch_day(target_date: date, settings: dict) -> dict | None:
                     last_val = 0.0
                 diff = last_val - first_val
                 if diff < 0:
-                    diff = 0.0  # Counter-Reset o.ä.
+                    diff = 0.0
                 result[db_field] = round(diff, 4)
         except Exception as exc:
             log.warning("HA API Fehler für %s: %s", entity_id, exc)
 
     return result if result else None
+
+
+def ha_api_fetch_range(settings: dict, first_date: date, last_date: date) -> dict[date, dict]:
+    """
+    Ruft HA History API für einen Zeitraum ab (ein Call pro Sensor für ganzen Range).
+    Gibt dict[date, dict[field, float]] zurück – deutlich effizienter als Einzel-Calls.
+    """
+    ha_url = settings.get("ha_url", "").rstrip("/")
+    ha_token = settings.get("ha_token", "")
+    if not ha_url or not ha_token:
+        return {}
+
+    from datetime import timedelta
+    start_dt = datetime.combine(first_date, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S")
+    end_dt   = datetime.combine(last_date, datetime.max.time()).strftime("%Y-%m-%dT%H:%M:%S")
+
+    # Rohdaten: dict[entity_id, list_of_entries]
+    raw: dict[str, list] = {}
+    for setting_key, _db_field in _HA_SENSOR_FIELDS.items():
+        entity_id = settings.get(setting_key, "").strip()
+        if not entity_id or entity_id in raw:
+            continue
+        url = (
+            f"{ha_url}/api/history/period/{start_dt}"
+            f"?filter_entity_id={entity_id}"
+            f"&minimal_response"
+            f"&significant_changes_only=0"
+            f"&end_time={end_dt}"
+        )
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {ha_token}",
+            "Content-Type": "application/json",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = _json.loads(resp.read().decode())
+            raw[entity_id] = data[0] if data else []
+        except Exception as exc:
+            log.warning("HA API Range Fehler für %s: %s", entity_id, exc)
+            raw[entity_id] = []
+
+    # Mapping: entity_id → db_field
+    entity_to_field: dict[str, str] = {}
+    for setting_key, db_field in _HA_SENSOR_FIELDS.items():
+        eid = settings.get(setting_key, "").strip()
+        if eid:
+            entity_to_field[eid] = db_field
+
+    # Pro Tag: Differenz first→last state pro Sensor
+    result: dict[date, dict[str, float]] = {}
+    total_days = (last_date - first_date).days + 1
+
+    for day_offset in range(total_days):
+        d = first_date + timedelta(days=day_offset)
+        day_data: dict[str, float] = {}
+        for entity_id, entries in raw.items():
+            db_field = entity_to_field.get(entity_id)
+            if not db_field:
+                continue
+            # Filtere Einträge für diesen Tag
+            day_entries = [
+                e for e in entries
+                if _parse_ha_datetime(e.get("last_changed", "")).date() == d
+            ]
+            if len(day_entries) >= 2:
+                try:
+                    first_v = float(day_entries[0].get("state", 0))
+                except (ValueError, TypeError):
+                    first_v = 0.0
+                try:
+                    last_v = float(day_entries[-1].get("state", 0))
+                except (ValueError, TypeError):
+                    last_v = 0.0
+                diff = max(last_v - first_v, 0.0)
+                day_data[db_field] = round(diff, 4)
+        if day_data:
+            result[d] = day_data
+
+    return result
+
+
+def _parse_ha_datetime(dt_str: str) -> datetime:
+    """Parst HA datetime Strings (mit oder ohne Mikrosekunden)."""
+    try:
+        return datetime.fromisoformat(dt_str)
+    except (ValueError, TypeError):
+        return datetime.min
+
+
+def ha_import_range(first_date: date, last_date: date) -> tuple[int, int, str]:
+    """
+    Importiert komplette History von HA für Zeitraum [first_date, last_date].
+    Gibt (imported_days, total_days, message) zurück.
+    Alles in EINER DB-Transaction.
+    """
+    settings = get_ha_settings()
+    if not settings.get("ha_url"):
+        return 0, 0, "HA URL nicht konfiguriert."
+
+    range_data = ha_api_fetch_range(settings, first_date, last_date)
+    if not range_data:
+        return 0, 0, f"Keine Daten von HA für {first_date} – {last_date}."
+
+    from datetime import timedelta
+    total_days = (last_date - first_date).days + 1
+    imported = 0
+
+    with db.session.begin():
+        for day_offset in range(total_days):
+            d = first_date + timedelta(days=day_offset)
+            data = range_data.get(d)
+            if not data:
+                continue
+            rec = DailyEnergy.query.filter_by(day=d).first()
+            if rec:
+                for k, v in data.items():
+                    setattr(rec, k, v)
+            else:
+                db.session.add(DailyEnergy(day=d, **data))
+            imported += 1
+
+        db.session.add(ImportLog(
+            filename=f"HA-RANGE-{first_date}-to-{last_date}",
+            year=first_date.year,
+            month=first_date.month,
+            records_count=imported,
+            source="ha_api",
+        ))
+
+    return imported, total_days, (
+        f"✓ {imported}/{total_days} Tage importiert "
+        f"({first_date} → {last_date})"
+    )
 
 
 def ha_import_day(target_date: date) -> tuple[int, str]:
@@ -701,6 +832,7 @@ def settings_route():
         ]
         for key in sensor_keys:
             Settings.set(key, request.form.get(key, "").strip())
+        Settings.set("ha_history_first_date", request.form.get("ha_history_first_date", "").strip())
         flash("Einstellungen gespeichert!", "success")
         return redirect(url_for("settings_route"))
 
@@ -749,6 +881,65 @@ def ha_test_api():
         return jsonify({"ok": True, "ha_message": data.get("message", "OK")})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/ha-import-range", methods=["POST"])
+def ha_import_range_api():
+    """
+    Importiert komplette History von HA.
+    Params: first=YYYY-MM-DD (default: erster eigener Tag oder 2024-01-01)
+            last=YYYY-MM-DD  (default: gestern)
+    Gibt JSON mit imported/total zurück.
+    Da dies länger dauern kann, läuft es synchron (bis ~500 Tage ok).
+    """
+    from datetime import timedelta
+
+    first_str = request.args.get("first", "")
+    last_str  = request.args.get("last", "")
+
+    # Default: gestern
+    yesterday = date.today() - timedelta(days=1)
+
+    if last_str:
+        try:
+            last_date = date.fromisoformat(last_str)
+        except ValueError:
+            return jsonify({"error": "Ungültiges last-Datum"}), 400
+    else:
+        last_date = yesterday
+
+    if first_str:
+        try:
+            first_date = date.fromisoformat(first_str)
+        except ValueError:
+            return jsonify({"error": "Ungültiges first-Datum"}), 400
+    else:
+        # Default: Setting oder Jahr zurück
+        first_setting = Settings.get("ha_history_first_date", "")
+        if first_setting:
+            try:
+                first_date = date.fromisoformat(first_setting)
+            except ValueError:
+                first_date = date(last_date.year, 1, 1)
+        else:
+            first_date = date(last_date.year, 1, 1)
+
+    if first_date > last_date:
+        return jsonify({"error": "first-Datum nach last-Datum"}), 400
+
+    try:
+        imported, total, msg = ha_import_range(first_date, last_date)
+        return jsonify({
+            "ok": True,
+            "imported": imported,
+            "total": total,
+            "first": str(first_date),
+            "last": str(last_date),
+            "message": msg,
+        })
+    except Exception as exc:
+        log.exception("HA Range Import failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
