@@ -325,11 +325,15 @@ def ha_api_fetch_range(settings: dict, first_date: date, last_date: date) -> dic
 
 
 def _parse_ha_datetime(dt_str: str) -> datetime:
-    """Parst HA datetime Strings (mit oder ohne Mikrosekunden)."""
+    """Parst HA datetime Strings (mit oder ohne Mikrosekunden/Zeitzone)."""
     try:
         return datetime.fromisoformat(dt_str)
     except (ValueError, TypeError):
-        return datetime.min
+        # Fallback: nur den Datumsteil nehmen
+        try:
+            return datetime.fromisoformat(dt_str[:19])
+        except (ValueError, TypeError):
+            return datetime.min
 
 
 def ha_import_range(first_date: date, last_date: date) -> tuple[int, int, str]:
