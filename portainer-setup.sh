@@ -1,9 +1,8 @@
-#!/bin/bash
+#!/bin/sh
 # ═══════════════════════════════════════════════════════════════
 # PV-Amortisations-Rechner — Ein-Klick-Installation
 # 
-# Ausführen im Terminal deines Alpine-Servers (SSH oder Portainer Exec):
-#
+# Ausführen im Terminal:
 #   wget https://raw.githubusercontent.com/bjk201/hermes/feature/pv-rechner/portainer-setup.sh
 #   chmod +x portainer-setup.sh
 #   ./portainer-setup.sh
@@ -20,143 +19,120 @@ echo "╚═══════════════════════�
 echo ""
 
 # ── 1. Abhängigkeiten prüfen ──────────────────────────────────
-echo "→ Prüfe Abhängigkeiten..."
+echo "→ Pruefe Abhaengigkeiten..."
 
-if ! command -v docker &> /dev/null; then
-    echo "❌ Docker nicht gefunden. Bitte zuerst installieren:"
-    echo "   apk add docker"
-    echo "   rc-update add docker boot"
-    echo "   service docker start"
+if ! command -v docker > /dev/null 2>&1; then
+    echo "❌ Docker nicht gefunden."
+    echo "   apk add docker && rc-update add docker boot && service docker start"
     exit 1
 fi
 
-# docker-compose oder docker compose
-if command -v docker-compose &> /dev/null; then
+if command -v docker-compose > /dev/null 2>&1; then
     COMPOSE="docker-compose"
-elif docker compose version &> /dev/null 2>&1; then
+elif docker compose version > /dev/null 2>&1; then
     COMPOSE="docker compose"
 else
-    echo "❌ Docker Compose nicht gefunden. Bitte zuerst installieren:"
+    echo "❌ Docker Compose nicht gefunden."
     echo "   apk add docker-compose"
     exit 1
 fi
 
-echo "   ✅ Docker gefunden"
-echo "   ✅ Docker Compose gefunden"
+echo "   ✅ Docker + Compose gefunden"
 
 # ── 2. Verzeichnis anlegen ─────────────────────────────────────
 echo ""
-echo "→ Erstelle Verzeichnis $DEPLOY_DIR ..."
+echo "→ Erstelle $DEPLOY_DIR ..."
 mkdir -p "$DEPLOY_DIR"
-cd "$DEPLOY_DIR"
 
 # ── 3. Code herunterladen ──────────────────────────────────────
 echo ""
 echo "→ Lade Code von GitHub herunter..."
 
-# Temporäres Verzeichnis für Download
-TMP_DIR=$(mktemp -d)
-trap "rm -rf $TMP_DIR" EXIT
+TMP_DIR="/tmp/pv-download-$$"
+mkdir -p "$TMP_DIR"
 
 DOWNLOAD_URL="https://codeload.github.com/bjk201/hermes/zip/refs/heads/feature/pv-rechner"
 
-if command -v wget &> /dev/null; then
+if command -v wget > /dev/null 2>&1; then
     wget -q "$DOWNLOAD_URL" -O "$TMP_DIR/code.zip"
-elif command -v curl &> /dev/null; then
+elif command -v curl > /dev/null 2>&1; then
     curl -sL "$DOWNLOAD_URL" -o "$TMP_DIR/code.zip"
 else
-    echo "❌ Weder wget noch curl gefunden. Bitte eines installieren:"
-    echo "   apk add wget"
+    echo "❌ wget oder curl noetig: apk add wget"
     exit 1
 fi
 
-# Entpacken
 cd "$TMP_DIR"
 unzip -q code.zip
-EXTRACTED_DIR=$(find . -maxdepth 1 -name "hermes-*" -type d | head -1)
 
-if [ -z "$EXTRACTED_DIR" ]; then
-    echo "❌ Fehler: ZIP-Inhalt nicht wie erwartet"
-    exit 1
-fi
+# Entpackten Ordner finden
+EXTRACTED=$(find . -maxdepth 1 -name "hermes-*" -type d | head -1)
 
-# In Deploy-Verzeichnis kopieren (außer .env)
-cd "$DEPLOY_DIR"
-if [ -f ".env" ]; then
-    cp .env .env.backup
-fi
+mv "$EXTRACTED"/* "$DEPLOY_DIR/"
 
-cp -r "$TMP_DIR/$EXTRACTED_DIR/"* .
+# Aufräumen
+rm -rf "$TMP_DIR"
 
-if [ -f ".env.backup" ]; then
-    mv .env.backup .env
-fi
-
-echo "   ✅ Code erfolgreich geladen"
+echo "   ✅ Code geladen nach $DEPLOY_DIR"
 
 # ── 4. .env Datei ──────────────────────────────────────────────
-echo ""
+cd "$DEPLOY_DIR"
+
 if [ ! -f ".env" ]; then
+    echo ""
     echo "→ Erstelle .env Datei..."
 
-    # Zufällige Passwörter generieren
-    if command -v openssl &> /dev/null; then
+    if command -v openssl > /dev/null 2>&1; then
         DB_PASS=$(openssl rand -hex 12)
         SECRET_KEY=*** -hex 32)
+        APP_PASS=$(openssl rand -hex 8)
     else
-        DB_PASS=$(head -c 16 /dev/urandom | head -c 32)
-        SECRET_KEY=*** -c 32 /dev/urandom | head -c 64)
+        DB_PASS="pvdb$(date +%s | tail -c 9)"
+        SECRET_KEY="pvsecret$(date +%s%N | tail -c 16)"
+        APP_PASS="pv$(date +%s | tail -c 7)"
     fi
 
-    cat > .env << ENVEOF
-POSTGRES_DB=pvrechner
-POSTGRES_USER=pvuser
-POSTGRES_PASSWORD=***...ll)
-echo ""
-    echo "⚠️  WICHTIG: Bitte .env Datei anpassen!"
+    {
+        echo "POSTGRES_DB=pvrechner"
+        echo "POSTGRES_USER=pvuser"
+        echo "POSTGRES_PASSWORD=***"
+        echo "APP_PASSWORD=$APP_PASS"
+        echo "SECRET_KEY=$SECRET_KEY"
+        echo "APP_PORT=3333"
+    } > .env
+
     echo ""
-    echo "   Aktuell gesetzte Werte:"
-    echo "   - POSTGRES_PASSWORD: $DB_PASS"
-    echo "   - SECRET_KEY:        $SECRET_KEY"
-    echo "   - APP_PASSWORD:      pv2024 (bitte ändern!)"
+    echo "   ⚠️  Notiere dir diese Zugangsdaten:"
     echo ""
-    echo "   Zum Ändern:"
-    echo "   vi $DEPLOY_DIR/.env"
+    echo "   DB_PASSWORD:  $DB_PASS"
+    echo "   APP_PASSWORD: $APP_PASS"
+    echo "   SECRET_KEY:   $SECRET_KEY"
     echo ""
-    read -p ".env jetzt automatisch mit sicherem APP_PASSWORD generieren? [J/n] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        echo "   OK, .env bleibt wie oben. Bitte später manuell ändern!"
-    else
-        APP_PASS=$(openssl rand -hex 8)
-        sed -i "s/APP_PASSWORD=pv2024/APP_PASSWORD=$APP_PASS/" .env
-        echo "   ✅ APP_PASSWORD gesetzt: $APP_PASS"
-        echo "      (Notiere dir dieses Passwort!)"
-    fi
+    echo "   Zum Ändern: vi $DEPLOY_DIR/.env"
+    echo ""
 else
-    echo "   ✅ .env bereits vorhanden (nicht überschrieben)"
+    echo ""
+    echo "   ✅ .env bereits vorhanden"
 fi
 
-# ── 5. Docker Compose starten ──────────────────────────────────
-echo ""
+# ── 5. Container starten ───────────────────────────────────────
 echo "→ Starte Container..."
-echo "$COMPOSE up -d --build"
-
-$COMPOSE up -d --build
+$COMPOSE up -d --build --remove-orphans
 
 # ── 6. Warten auf DB ───────────────────────────────────────────
 echo ""
 echo "→ Warte auf Datenbank..."
 for i in $(seq 1 30); do
-    if docker exec pv-rechner-db-1 pg_isready -U pvuser -d pvrechner &> /dev/null; then
+    if $COMPOSE exec -T db pg_isready -U pvuser -d pvrechner > /dev/null 2>&1; then
         echo "   ✅ Datenbank bereit"
         break
     fi
+    printf "\r   ⏳ Warte... (%s/30)" "$i"
     sleep 2
 done
 
 # ── 7. Fertig ──────────────────────────────────────────────────
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "SERVER-IP")
+SERVER_IP=$(ip -4 addr show | grep -oP '(?<=inet\s)[\d.]+' | grep -v 127.0.0.1 | head -1)
 
 echo ""
 echo ""
@@ -164,24 +140,16 @@ echo "╔═══════════════════════�
 echo "║  ✅ Installation abgeschlossen!                          ║"
 echo "╠══════════════════════════════════════════════════════════╣"
 echo "║                                                          ║"
-echo "║  App erreichbar auf:                                     ║"
-echo "║  http://$SERVER_IP:3333                    ║"
+echo "║  App: http://${SERVER_IP}:3333                            ║"
+echo "║  Login: siehe APP_PASSWORD oben                          ║"
 echo "║                                                          ║"
-echo "║  Login: APP_PASSWORD aus .env                            ║"
-echo "║                                                          ║"
-echo "║  Nach dem Login:                                         ║"
-echo "║  1. → HA-Einstellungen                                   ║"
-echo "║  2. HA URL: http://192.168.1.103:8123                    ║"
-echo "║  3. Long-Lived Access Token eintragen                    ║"
-echo "║  4. Sensor-Entity-IDs zuweisen                           ║"
-echo "║  5. Verbindung testen → History importieren             ║"
+echo "║  Nach Login: → HA-Einstellungen                         ║"
+echo "║  HA URL: http://192.168.1.103:8123                       ║"
 echo "║                                                          ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
-echo "Stack-Dateien in: $DEPLOY_DIR"
-echo ""
-echo "Nützliche Befehle:"
-echo "  cd $DEPLOY_DIR && $COMPOSE logs -f    # Logs anzeigen"
-echo "  cd $DEPLOY_DIR && $COMPOSE restart     # Neustart"
+echo "Befehle:"
+echo "  cd $DEPLOY_DIR && $COMPOSE logs -f    # Logs"
+echo "  cd $DEPLOY_DIR && $COMPOSE restart     # Restart"
 echo "  cd $DEPLOY_DIR && $COMPOSE down       # Stoppen"
 echo ""
