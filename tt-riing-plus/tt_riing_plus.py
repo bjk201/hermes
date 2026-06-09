@@ -240,7 +240,11 @@ class TTController:
         lines.append(f"\n[2] Suche nach bekannten Controllers (VID={TT_VID:#06x}):")
         found_any = False
         for pid, name in TT_CONTROLLERS.items():
-            dev = usb.core.find(idVendor=TT_VID, idProduct=pid)
+            try:
+                dev = usb.core.find(idVendor=TT_VID, idProduct=pid)
+            except usb.core.USBError as e:
+                lines.append(f"    PID {pid:#06x} ({name}): USB-Fehler: {e}")
+                continue
             status = "✅ GEFUNDEN" if dev else "—"
             lines.append(f"    PID {pid:#06x} ({name}): {status}")
             if dev is not None:
@@ -254,31 +258,31 @@ class TTController:
                     lines.append(f"      Serial:       {serial}")
                     lines.append(f"      Bus:          {dev.bus}")
                     lines.append(f"      Address:      {dev.address}")
-                except Exception as e:
-                    lines.append(f"      Info-Lesefehler: {e}")
+                except Exception as e2:
+                    lines.append(f"      Info-Lesefehler: {e2}")
 
         if not found_any:
             lines.append("\n    ⚠️ Kein bekannter Controller gefunden!")
 
-        # 3. Liste alle USB-Geräte auf mit VID 0x264a
+        # 3. Alle USB-Geräte mit VID 0x264a (iterativ, nicht find_all)
         lines.append(f"\n[3] Alle USB-Geräte mit VID {TT_VID:#06x}:")
+        found_vid = False
         try:
-            tt_devices = list(usb.core.find(find_all=True, idVendor=TT_VID))
-            if not tt_devices:
+            for pid_x in TT_CONTROLLERS:
+                d = usb.core.find(idVendor=TT_VID, idProduct=pid_x)
+                if d is not None:
+                    found_vid = True
+                    name = TT_CONTROLLERS.get(pid_x, "UNBEKANNT")
+                    lines.append(f"    PID {pid_x:#06x} ({name}) Bus={d.bus} Addr={d.address}")
+            if not found_vid:
                 lines.append("    Keine gefunden!")
-            for d in tt_devices:
-                pid = d.idProduct
-                name = TT_CONTROLLERS.get(pid, "UNBEKANNT")
-                lines.append(f"    PID {pid:#06x} ({name}) Bus={d.bus} Addr={d.address}")
         except Exception as e:
             lines.append(f"    Fehler beim Scannen: {e}")
 
-        # 4. Liste ALL-USB devices (falls der Controller eine andere VID hat)
+        # 4. Alle USB-Geräte
         lines.append("\n[4] Alle angeschlossenen USB-Geräte (VID:PID):")
         try:
             all_devs = list(usb.core.find(find_all=True))
-            if not all_devs:
-                lines.append("    Keine USB-Geräte sichtbar!")
             for d in all_devs[:20]:
                 vid = d.idVendor
                 pid = d.idProduct
@@ -290,7 +294,7 @@ class TTController:
                 lines.append(f"    {vid:#06x}:{pid:#06x}  {mfg}")
             if len(all_devs) > 20:
                 lines.append(f"    ... und {len(all_devs)-20} weitere")
-        except usb.core.USBError as e:
+        except Exception as e:
             lines.append(f"    Fehler beim Scannen: {e}")
             if "Access denied" in str(e):
                 lines.append("    ⚠️ BERECHTIGUNG PROBLEM!")
@@ -354,6 +358,7 @@ class TTController:
             if self.dev.is_kernel_driver_active(0):
                 tt_log("INFO", "Kernel driver active — detaching")
                 self.dev.detach_kernel_driver(0)
+                tt_log("INFO", "Kernel driver detached")
         except (usb.core.USBError, NotImplementedError) as e:
             tt_log("DEBUG", f"Kernel driver detach: {e}")
 
@@ -361,16 +366,23 @@ class TTController:
             self.dev.set_configuration()
             tt_log("INFO", "USB configuration set")
         except usb.core.USBError as e:
-            tt_log("WARNING", f"set_configuration failed: {e}")
+            tt_log("WARNING", f"set_configuration failed (may be OK): {e}")
 
-        self.cfg  = self.dev.get_active_configuration()
+        self.cfg = self.dev.get_active_configuration()
         self.iface = self.cfg[(0, 0)]
         # claim interface
         try:
             usb.util.claim_interface(self.dev, self.iface)
             tt_log("INFO", f"USB interface claimed (iface={self.iface.bInterfaceNumber})")
         except usb.core.USBError as e:
-            tt_log("WARNING", f"claim_interface failed: {e}")
+            tt_log("WARNING", f"claim_interface failed (retrying after detach): {e}")
+            try:
+                if self.dev.is_kernel_driver_active(0):
+                    self.dev.detach_kernel_driver(0)
+                    usb.util.claim_interface(self.dev, self.iface)
+                    tt_log("INFO", "USB interface claimed after detach retry")
+            except Exception as e2:
+                tt_log("WARNING", f"claim_interface retry failed: {e2}")
 
         self.ready = True
         self._init_controller()
