@@ -10,12 +10,21 @@ VENV_DIR="$SCRIPT_DIR/.venv"
 
 echo "🛠  Installiere System-Abhängigkeiten..."
 sudo apt update
+
+# PyQt5 — Paketname je nach Distro unterschiedlich
+PYQT_EXTRA=""
+for pkg in python3-pyqt5.qtwidgets python3-pyqt5.qtquick; do
+    if apt-cache show "$pkg" &>/dev/null 2>&1; then
+        PYQT_EXTRA="$PYQT_EXTRA $pkg"
+    fi
+done
+
 sudo apt install -y \
     python3-pyqt5 \
-    python3-pyqt5.qtwidgets \
     libusb-1.0-0-dev \
     python3-pip \
-    python3-venv
+    python3-venv \
+    $PYQT_EXTRA
 
 echo ""
 echo "🐍  Erstelle Virtual Environment..."
@@ -35,7 +44,6 @@ echo ""
 echo "📋  Schreibe udev-Regel für non-root USB-Zugriff..."
 sudo tee /etc/udev/rules.d/99-thermaltake.rules << 'UDEVEOF'
 # Thermaltake RGB Controllers (alle PIDs)
-# Unterstützt: Riing Plus, Riing Trio, Riing Quad, Flo 360, TOUGHRGB
 SUBSYSTEM=="usb", ATTR{idVendor}=="264a", MODE="0666"
 UDEVEOF
 
@@ -53,6 +61,9 @@ echo ""
 echo "Oder manuell:"
 echo "   source $VENV_DIR/bin/activate"
 echo "   python3 tt_riing_plus.py"
+echo ""
+echo "Headless Diagnose:"
+echo "   python3 tt_riing_plus.py --diag"
 echo ""
 echo "🔌 Stecke den Thermaltake Controller per USB ein falls noch nicht geschehen."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
