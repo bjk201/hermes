@@ -32,7 +32,16 @@ from functools import partial
 try:
     import usb.core
     import usb.util
-    HAS_USB = True
+    # Test ob es wirklich funktioniert (manchmal importiert aber keine Backend)
+    try:
+        usb.core.find()
+        HAS_USB = True
+    except usb.core.NoBackendError:
+        HAS_USB = False
+        _logger = logging.getLogger("tt-riing-plus")
+        _logger.warning("pyusb importiert aber kein Backend — USB deaktiviert")
+    except Exception:
+        HAS_USB = True  # Backend da, nur kein Gerät
 except ImportError:
     HAS_USB = False
 
@@ -390,12 +399,12 @@ class TTController:
 
     def _send_raw(self, data: bytes):
         raw = data[:64].ljust(64, b'\x00')
-        if self.test_mode:
+        if self.test_mode or self.dev is None:
             return
         try:
             written = self.dev.write(0x02, raw, timeout=1000)
             tt_log("DEBUG", f"USB write: {written}/64 bytes")
-        except usb.core.USBError as e:
+        except Exception as e:
             tt_log("ERROR", f"USB write failed: {e}")
 
     def _read_resp(self, timeout=1000) -> list:
