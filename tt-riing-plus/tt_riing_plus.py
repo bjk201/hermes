@@ -498,16 +498,20 @@ class RingWidget(QWidget):
             angle = math.radians(i * led_a - 90)
             x = int(cx + math.cos(angle) * ((outer_r + inner_r) / 2))
             y = int(cy + math.sin(angle) * ((outer_r + inner_r) / 2))
-            radius = max(4, (outer_r - inner_r) / 2 - 1)
+            radius = max(4, int((outer_r - inner_r) / 2 - 1))
             p.setBrush(QBrush(QColor(r, g, b)))
             p.setPen(Qt.NoPen)
-            p.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
+            rx = x - radius
+            ry = y - radius
+            p.drawEllipse(rx, ry, radius * 2, radius * 2)
 
         # centre circle (fan hub)
         p.setBrush(QBrush(QColor(30, 30, 30)))
         p.setPen(QPen(QColor(80, 80, 80), 1))
-        p.drawEllipse(cx - inner_r + 2, cy - inner_r + 2,
-                      (inner_r - 2) * 2, (inner_r - 2) * 2)
+        cxr = cx - inner_r + 2
+        cyr = cy - inner_r + 2
+        sz = int((inner_r - 2) * 2)
+        p.drawEllipse(int(cxr), int(cyr), sz, sz)
         p.end()
 
 
