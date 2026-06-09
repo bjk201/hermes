@@ -50,35 +50,40 @@ try:
 except ImportError:
     HAS_QT = False
 
-# ─────────────────────────────────────────────
-#  Logging Setup (after HAS_USB/HAS_QT known)
-# ─────────────────────────────────────────────
-LOG_DIR = os.path.join(os.path.expanduser("~"), ".config", "tt-riing-plus")
-os.makedirs(LOG_DIR, exist_ok=True)
-LOG_FILE = os.path.join(LOG_DIR, "tt-riing-plus.log")
+def _safe_logging_setup():
+    """Create logging handlers safely — never crash the app over a broken log dir."""
+    logger = logging.getLogger("tt-riing-plus")
+    logger.setLevel(logging.DEBUG)
 
-_logger = logging.getLogger("tt-riing-plus")
-_logger.setLevel(logging.DEBUG)
+    # Console handler — always works
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    logger.addHandler(ch)
 
-# File handler — captures everything
-_fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
-_fh.setLevel(logging.DEBUG)
-_fh.setFormatter(logging.Formatter(
-    "%(asctime)s [%(levelname)-7s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-))
-_logger.addHandler(_fh)
+    # File handler — may fail if ~/.config is missing / unwritable / disk full
+    try:
+        log_dir = os.path.join(os.path.expanduser("~"), ".config", "tt-riing-plus")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "tt-riing-plus.log")
+        fh = logging.FileHandler(log_path, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)-7s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        ))
+        logger.addHandler(fh)
+        logger.info("%s", "=" * 40)
+        logger.info("Log file: %s", log_path)
+    except Exception as e:
+        logger.warning("File logging disabled: %s", e)
 
-# Console handler — INFO+
-_ch = logging.StreamHandler()
-_ch.setLevel(logging.INFO)
-_ch.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
-_logger.addHandler(_ch)
+    return logger, log_path if 'log_path' in dir() else None
 
-_logger.info("=" * 60)
+
+_logger, LOG_FILE = _safe_logging_setup()
 _logger.info("TT Riing Plus Control started")
 _logger.info("Python %s | Platform: %s", sys.version.split()[0], sys.platform)
 _logger.info("usb=%s | qt=%s", HAS_USB, HAS_QT)
-_logger.info("Log file: %s", LOG_FILE)
 
 _log_callback = None  # GUI sets this for live log forwarding
 
@@ -1011,14 +1016,93 @@ class MainWindow(QMainWindow):
 #  Entry Point
 # ─────────────────────────────────────────────
 def main():
-    app = QApplication(sys.argv)
-    app.setApplicationName("Thermaltake Riing Plus Control")
-    app.setApplicationVersion("1.0.0")
+    # ── Pre-flight: catch import/startup errors and show them ──
+    try:
+        app = QApplication(sys.argv)
+        app.setApplicationName("Thermaltake Riing Plus Control")
+        app.setApplicationVersion("1.0.0")
+    except Exception as e:
+        _print_startup_diag(f"Qt-Init fehlgeschlagen: {e}")
+        sys.exit(1)
 
-    window = MainWindow()
-    window.show()
+    # ── System-Check — warnt vor Problemen bevor sie crashen ──
+    _system_check()
+
+    try:
+        window = MainWindow()
+        window.show()
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        tt_log("ERROR", f"Startup crash: {e}\n{tb}")
+        try:
+            QMessageBox.critical(None, "Startup Error",
+                f"App konnte nicht starten:\n\n{e}\n\n"
+                f"Log: {LOG_FILE or '(kein Log)'}\n\n"
+                f"Diagnose starten mit: python3 {__file__} --diag")
+        except Exception:
+            _print_startup_diag(tb)
+        sys.exit(1)
+
     sys.exit(app.exec_())
 
 
+def _print_startup_diag(msg: str):
+    """Print diagnostic text that is also visible when Qt is broken."""
+    print(f"\n{'='*50}", file=sys.stderr)
+    print("  TT Riing Plus — Startup Fehler", file=sys.stderr)
+    print(f"{'='*50}\n", file=sys.stderr)
+    print(msg, file=sys.stderr)
+
+
+def _system_check():
+    """Lightweight pre-startup check — logs problems before the GUI loads."""
+    # pyusb
+    if not HAS_USB:
+        tt_log("ERROR", "pyusb fehlt! USB nicht verfügbar.")
+        print("[FEHLER] pyusb nicht installiert: pip3 install pyusb", file=sys.stderr)
+
+    # PyQt5 / X11
+    if not HAS_QT:
+        tt_log("ERROR", "PyQt5 fehlt! GUI nicht verfügbar.")
+        print("[FEHLER] PyQt5 nicht installiert: sudo apt install python3-pyqt5", file=sys.stderr)
+
+    # DISPLAY variable (headless?)
+    display = os.environ.get("DISPLAY", "")
+    wayland = os.environ.get("WAYLAND_DISPLAY", "")
+    if not display and not wayland:
+        tt_log("WARNING", "Kein DISPLAY/WAYLAND_DISPLAY — GUI vermutlich nicht sichtbar")
+        print("[WARNUNG] Kein X11/Wayland display. GUI nur mit DISPLAY=:0 ... starten", file=sys.stderr)
+
+    # Log-Pfad prüfen
+    try:
+        if LOG_FILE:
+            os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+            with open(LOG_FILE, "a"):
+                pass
+            tt_log("DEBUG", f"Log writable: {LOG_FILE}")
+        else:
+            tt_log("WARNING", "Kein Log-File — File Logging deaktiviert")
+    except Exception as e:
+        tt_log("WARNING", f"Log nicht beschreibbar: {e}")
+
+
 if __name__ == "__main__":
+    # Quick headless diagnostic:  python3 tt_riing_plus.py --diag
+    if "--diag" in sys.argv:
+        print("🔍 Starte USB-Diagnose (headless) ...\n")
+        try:
+            import usb.core  # noqa: F401
+        except ImportError:
+            print("❌ pyusb fehlschlägt: pip3 install pyusb\n")
+            sys.exit(1)
+        # Minimaler Controller für Diagnose
+        _ctl = TTController.__new__(TTController)
+        _ctl.dev = None; _ctl.cfg = None; _ctl.iface = None
+        _ctl.ready = False; _ctl.test_mode = True
+        _ctl._fan_count = [1] * MAX_CHANNELS
+        _ctl._detected_pid = None; _ctl._detected_name = None
+        print(_ctl.diagnose())
+        sys.exit(0)
+
     main()
