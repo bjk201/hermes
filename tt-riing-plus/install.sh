@@ -5,17 +5,33 @@
 # ─────────────────────────────────────────────
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/.venv"
+
 echo "🛠  Installiere System-Abhängigkeiten..."
 sudo apt update
 sudo apt install -y \
     python3-pyqt5 \
     python3-pyqt5.qtwidgets \
     libusb-1.0-0-dev \
-    python3-pip
+    python3-pip \
+    python3-venv
 
-echo "🐍  Installiere Python-Pakete..."
-pip3 install pyusb
+echo ""
+echo "🐍  Erstelle Virtual Environment..."
+if [ ! -d "$VENV_DIR" ]; then
+    python3 -m venv "$VENV_DIR"
+    echo "   ✅ venv erstellt: $VENV_DIR"
+else
+    echo "   ✅ venv existiert bereits"
+fi
 
+echo "🐍  Installiere Python-Pakete im venv..."
+"$VENV_DIR/bin/pip" install --upgrade pip
+"$VENV_DIR/bin/pip" install pyusb
+echo "   ✅ pyusb installiert"
+
+echo ""
 echo "📋  Schreibe udev-Regel für non-root USB-Zugriff..."
 sudo tee /etc/udev/rules.d/99-thermaltake.rules << 'UDEVEOF'
 # Thermaltake RGB Controllers (alle PIDs)
@@ -27,8 +43,16 @@ sudo udevadm control --reload
 sudo udevadm trigger
 
 echo ""
-echo "✅ Fertig! Starte mit:"
-echo "   cd $(dirname "$0")"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✅ Installation abgeschlossen!"
+echo ""
+echo "Starten mit:"
+echo "   cd $SCRIPT_DIR"
+echo "   ./tt-riing-plus.sh"
+echo ""
+echo "Oder manuell:"
+echo "   source $VENV_DIR/bin/activate"
 echo "   python3 tt_riing_plus.py"
 echo ""
 echo "🔌 Stecke den Thermaltake Controller per USB ein falls noch nicht geschehen."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

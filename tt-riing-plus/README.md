@@ -10,62 +10,83 @@ Vollständige Fan- & RGB-Steuerung für den **Thermaltake Riing Plus RGB Control
 - 🌈 **RGB-Lichtsteuerung** mit 7 Effekten: Static, Breathing, Wave, Ripple, Pulse, Spectrum Cycle, Rainbow Wave
 - 🔄 **Live-Vorschau** der 12-LED-Ringe direkt in der GUI
 - ⚡ **5 Kanäle** unterstützt (bis zu 5 Lüfter pro Kanal)
+- 🔍 **USB-Diagnose** — automatische Hardware-Prüfung + Log-Ausgabe
+- 📋 **Live-Logging** — farbcodiertes Log-Fenster + Datei-Log
 - 💾 **Dark-Theme** UI
+- 🔌 **Automatische Controller-Erkennung** — 5 bekannte PIDs
 
-## HW-Setup
+## Installation (empfohlen)
 
-```
-[Mainboard USB] ←→ [Thermaltake Riing Plus Controller] ←→ [Riing Plus Lüfter 1..N]
-                                   ↓ max 5 Kanäle
-                           12 LEDs pro Lüfter Ring
-```
-
-- **USB VID:PID:** `0x264a:0x1fa5`
-- **USB-Protokoll:** HID/Control Transfer (pyusb)
-
-## Installation
+Das Install-Script nutzt ein **Virtual Environment** (venv) — kein System-Python nötig, kein `--break-system-packages`.
 
 ```bash
-# Option A: Install-Script (empfohlen)
-chmod +x install.sh
+chmod +x install.sh tt-riing-plus.sh
 ./install.sh
-
-# Option B: Manuelle Installation
-sudo apt install python3-pyqt5 libusb-1.0-0-dev
-pip3 install pyusb
-
-# udev-Regel für USB-Zugriff ohne root
-sudo tee /etc/udev/rules.d/99-thermaltake.rules << 'EOF'
-SUBSYSTEM=="usb", ATTR{idVendor}=="264a", ATTR{idProduct}=="1fa5", MODE="0666"
-EOF
-sudo udevadm control --reload
-sudo udevadm trigger
 ```
 
 ## Start
 
 ```bash
+# Eins-Click-Start (aktiviert venv automatisch):
+./tt-riing-plus.sh
+
+# Oder manuell:
+source .venv/bin/activate
 python3 tt_riing_plus.py
+
+# Headless USB-Diagnose (ohne GUI):
+python3 tt_riing_plus.py --diag
 ```
 
-## Nutzung
+> **Wichtig:** Bei `pip3 install pyusb` Fehler wegen `externally-managed-environment` — einfach die `install.sh` nutzen, die macht automatisch ein venv.
 
-1. **Tab wählen** → CH1 bis CH5
-2. **Lüftergeschwindigkeit** per Slider oder Preset-Button
-3. **RGB-Effekt** auswählen (farblich active nur bei "Static")
-4. **Farbe wählen** (nur bei Static)
-5. **"Auf Kanal anwenden"** oder **"Alle anwenden"**
+## Deinstallation
 
-> ⚠️ **Tipp:** Lüfter stoppen möglicherweise unter ~20 PWM-Stufe — hardwareabhängig.
+```bash
+chmod +x uninstall.sh
+./uninstall.sh
+```
+
+Entfernt: udev-Regel, Virtual Environment, Config/Log (mit Bestätigung).
+
+## Hardware
+
+```
+[Mainboard USB] ←→ [Thermaltake RGB Controller] ←→ [Riing Plus Lüfter 1..N]
+                                   ↓ max 5 Kanäle
+                           12 LEDs pro Lüfter Ring
+```
+
+**Unterstützte Controller (automatisch erkannt):**
+
+| PID | Gerät |
+|-----|-------|
+| `0x1fa5` | Riing Plus |
+| `0x206b` | Riing Trio |
+| `0x2070` | Riing Quad |
+| `0x206e` | Flo 360 (AIO) |
+| `0x206c` | TOUGHRGB |
+
+**USB-Protokoll:** HID/Control Transfer (pyusb)
+
+## Troubleshooting
+
+1. **❓ Hilfe-Button** — zeigt udev-Befehl und Einstellungen
+2. **`./tt-riing-plus.sh`** — startet mit venv, falls `pyusb` nicht im System installiert war
+3. **`python3 tt_riing_plus.py --diag`** — headless USB-Diagnose
+4. **`~/.config/tt-riing-plus/tt-riing-plus.log`** — detailreich Log
+5. **`🔍 Diagnose`** Button — USB-Bus-Scan mit Kernel-Driver-Status falls die App crasht
 
 ## Architektur
 
-| Modul              | Funktion                                              |
-|--------------------|-------------------------------------------------------|
-| `TTController`     | USB-Kommunikation, Packet-Building, Init             |
-| `RingWidget`       | Qt Custom Widget — LED-Ring Vorschau                   |
-| `ChannelControl`   | Steuerelemente pro Kanal (Speed, Effekt, Color)        |
-| `MainWindow`       | Hauptfenster, Tab-Navigation, globale Aktionen         |
+| Modul | Funktion |
+|-------|----------|
+| `TTController` | USB-Com, Packet-Init, `diagnose()` |
+| `RingWidget` | LED-Ring Vorschau Widget |
+| `ChannelControl` | Pro-Kanal UI (Speed, Effekt, Farbe) |
+| `MainWindow` | Hauptfenster, Tabs, globale Aktionen |
+| `LogWindow` | Live-Log-Viewer Dialog |
+| `DiagnosticDialog` | USB-Diagnose Dialog |
 
 ## Lizenz
 
