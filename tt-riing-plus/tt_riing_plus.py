@@ -10,9 +10,10 @@ Features:
   - RGB-Farben pro Kanal
   - RGB-Effekte: Static, Breathing, Wave, Ripple, Pulse, Spectrum Cycle
   - Echtzeit-Vorschau der Ring-LEDs
+  - Automatische Controller-Erkennung (5 bekannte PIDs)
 
-Hardware: Thermaltake Riing Plus RGB Controller (USB HID)
-USB VID:PID = 0x264a:0x1fa5
+Hardware: Thermaltake RGB Controller (USB HID) — VID 0x264a
+Automatisch erkannt: Riing Plus, Riing Trio, Riing Quad, Flo 360, TOUGHRGB
 
 Author: OWL für Bjk201
 License: MIT
@@ -51,7 +52,19 @@ except ImportError:
 #  USB Protocol Constants
 # ─────────────────────────────────────────────
 TT_VID = 0x264a
-TT_PID = 0x1fa5    # Riing Plus Digital Controller
+
+# Alle bekannten Thermaltake RGB-Controller PIDs (automatische Erkennung)
+# Quelle: OpenRGB, tt-rgb, Linux kernel HID
+TT_CONTROLLERS = {
+    0x1fa5: "Riing Plus",        # TT Riing Plus Digital Controller
+    0x206e: "Flo 360",           # Thermaltake Flo 360 (AIO)
+    0x206c: "TOUGHRGB",          # ToughRAM RGB Controller
+    0x206b: "Riing Trio",        # Riing Trio Controller
+    0x2070: "Riing Quad",        # Riing Quad Controller
+}
+
+# Fallback PID wenn kein bekanntes Gerät gefunden wurde
+TT_PID_DEFAULT = 0x1fa5
 
 CMD_INIT1    = 0x28   # Init step 1 (magic init msg)
 CMD_INIT2    = 0x29   # Init step 2 (get config: fan count etc.)
@@ -146,14 +159,31 @@ class TTController:
             self.connect()
 
     # ── device plumbing ──
+    def _find_device(self):
+        """
+        Automatische Erkennung: durchsucht alle bekannten TT PIDs.
+        Gibt (device, pid, name) oder (None, None, None) zurück.
+        """
+        for pid, name in TT_CONTROLLERS.items():
+            dev = usb.core.find(idVendor=TT_VID, idProduct=pid)
+            if dev is not None:
+                return dev, pid, name
+        return None, None, None
+
     def connect(self) -> bool:
         if not HAS_USB:
             self.test_mode = True
             return False
-        self.dev = usb.core.find(idVendor=TT_VID, idProduct=TT_PID)
+
+        # Automatisch alle bekannten Controller-PIDs durchprobieren
+        self.dev, detected_pid, detected_name = self._find_device()
         if self.dev is None:
             self.test_mode = True
             return False
+
+        # Für Kompatibilität: aktuelle PID merken
+        self._detected_pid = detected_pid
+        self._detected_name = detected_name
 
         try:
             if self.dev.is_kernel_driver_active(0):
@@ -532,12 +562,17 @@ class MainWindow(QMainWindow):
         header.addWidget(title)
         header.addStretch()
 
-        # USB status indicator
-        self.usb_status = QLabel("🔌 USB: " +
-            ("NICHT VERBUNDEN" if self.controller.test_mode else "VERBUNDEN"))
-        self.usb_status.setStyleSheet(
-            "color: #e74c3c;" if self.controller.test_mode else "color: #2ecc71;"
-        )
+        # USB status indicator — zeigt erkannten Controller-Namen + PID
+        if self.controller.test_mode:
+            usb_text = "🔌 USB: NICHT VERBUNDEN"
+            usb_color = "#e74c3c"
+        else:
+            name = getattr(self.controller, '_detected_name', 'Unknown')
+            pid  = getattr(self.controller, '_detected_pid', 0)
+            usb_text = f"🔌 USB: {name} (PID {pid:#06x})"
+            usb_color = "#2ecc71"
+        self.usb_status = QLabel(usb_text)
+        self.usb_status.setStyleSheet(f"color: {usb_color};")
         header.addWidget(self.usb_status)
         main_layout.addLayout(header)
 
@@ -586,18 +621,28 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Alle Lüfter & LEDs ausgeschaltet", 3000)
 
     def _show_help(self):
-        QMessageBox.information(self, "Hilfe — Thermaltake Riing Plus",
+        # Dynamisch alle unterstützten PIDs auflisten
+        pid_list = ", ".join(f"<code>{p:#06x}</code>" for p in TT_CONTROLLERS)
+        udev_line = (
+            'SUBSYSTEM=="usb", ATTR{idVendor}=="264a", '
+            'ATTR{idProduct}=="*", MODE="0666"'
+        )
+
+        QMessageBox.information(self, "Hilfe — Thermaltake RGB Control",
             "<b>Erstmalige Nutzung:</b><br>"
             "1. Stecke den Thermaltake Controller per USB ein<br>"
             "2. Erstelle eine udev-Regel für USB-Zugriff ohne root:<br>"
-            "<code>sudo tee /etc/udev/rules.d/99-thermaltake.rules << 'EOF'<br>"
-            'SUBSYSTEM=="usb", ATTR{idVendor}=="264a", ATTR{idProduct}=="1fa5", MODE="0666"<br>'
+            f"<code>sudo tee /etc/udev/rules.d/99-thermaltake.rules << 'EOF'<br>"
+            f"{udev_line}<br>"
             "EOF</code><br>"
             "3. Reload udev: <code>sudo udevadm control --reload && sudo udevadm trigger</code><br>"
             "4. App neu starten.<br><br>"
+            f"<b>Unterstützte Controller:</b> {pid_list}<br><br>"
             "<b>Tipp:</b> Farbe funktioniert nur im 'Static'-Effekt. "
             "Andere Effekte (Breathing, Wave etc.) benutzen ihre eigenen Farben.<br><br>"
-            "<b>PWM-Bereich:</b> Werte unter ~20% können Lüfter stoppen lassen."
+            "<b>PWM-Bereich:</b> Werte unter ~20% können Lüfter stoppen lassen.<br><br>"
+            "<b>Automatische Erkennung:</b> Die App probiert alle bekannten PIDs durch "
+            "und zeigt den gefundenen Controller im Header an."
         )
 
     def closeEvent(self, event):

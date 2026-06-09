@@ -18,8 +18,9 @@ pip3 install pyusb
 
 echo "📋  Schreibe udev-Regel für non-root USB-Zugriff..."
 sudo tee /etc/udev/rules.d/99-thermaltake.rules << 'UDEVEOF'
-# Thermaltake Riing Plus RGB Controller
-SUBSYSTEM=="usb", ATTR{idVendor}=="264a", ATTR{idProduct}=="1fa5", MODE="0666"
+# Thermaltake RGB Controllers (alle PIDs)
+# Unterstützt: Riing Plus, Riing Trio, Riing Quad, Flo 360, TOUGHRGB
+SUBSYSTEM=="usb", ATTR{idVendor}=="264a", MODE="0666"
 UDEVEOF
 
 sudo udevadm control --reload
