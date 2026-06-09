@@ -38,6 +38,13 @@ chmod +x uninstall.sh
 ./uninstall.sh
 ```
 
+## Technische Details
+
+- **HID-basiert** (kein pyusb nötig) — kommuniziert über `/dev/hidraw*`
+- **Protokoll:** OpenRGB-kompatibel (Init: `0xFE 0x33`, RGB: `0x32 0x52`)
+- **Keine Kernel-Treiber nötig** — hidraw greift auf USB-HID zu
+- **Python 3.10–3.12** unterstützt (venv)
+
 ## Unterstützte Controller (automatisch erkannt)
 
 | PID | Gerät |
@@ -55,8 +62,7 @@ chmod +x uninstall.sh
 - **📋 Log-Button** — Live-Log mit Filter
 - **🔍 Diagnose-Button** — USB-Bus-Scan
 - **Log-Datei:** `~/.config/tt-riing-plus/tt-riing-plus.log`
-- **USB-Endpoint:** Die App findet das korrekte OUT/IN-Endpoint automatisch (kein hardcoded 0x02 mehr)
-- **Python 3.10–3.12:** Unterstützt — die App explizit mit venv-Python gestartet
+- **udev-Regel:** `SUBSYSTEM=="usb", ATTR{idVendor}=="264a", MODE="0666"`
 
 ## Lizenz
 

@@ -14,7 +14,7 @@ echo ""
 # ── 1. System-Pakete (braucht sudo) ──
 echo "[1/3] Installiere System-Abhängigkeiten..."
 sudo apt update -qq 2>&1 | tail -1
-sudo apt install -y -qq python3-venv python3-pip libusb-1.0-0-dev 2>&1 | tail -2
+sudo apt install -y -qq python3-venv python3-pip 2>&1 | tail -2
 
 # ── 2. Virtual Environment + Python-Pakete (KEIN sudo!) ──
 echo "[2/3] Erstelle Virtual Environment..."
@@ -24,20 +24,17 @@ else
     python3 -m venv "$VENV_DIR"
 fi
 
-echo "  Installiere PyQt5 + pyusb..."
+echo "  Installiere PyQt5..."
 "$VENV_DIR/bin/pip" install -q --upgrade pip 2>&1 | tail -1
-"$VENV_DIR/bin/pip" install -q PyQt5 pyusb 2>&1 | tail -2
+"$VENV_DIR/bin/pip" install -q PyQt5 2>&1 | tail -2
 
 # ── 3. Verifikation ──
 echo "[3/3] Verifikation..."
 HAS_QT=$("$VENV_DIR/bin/python3" \
-    -c "from PyQt5.QtWidgets import QApplication; print('OK')" 2>&1)
-HAS_USB=$("$VENV_DIR/bin/python3" \
-    -c "import usb.core; print('OK')" 2>&1)
+    -c "from PyQt5.QtWidgets import QApplication; print('OK')")
 echo "  PyQt5: $HAS_QT"
-echo "  pyusb:  $HAS_USB"
 
-if [ "$HAS_QT" != "OK" ] || [ "$HAS_USB" != "OK" ]; then
+if [ "$HAS_QT" != "OK" ]; then
     echo ""
     echo "❌ Fehler bei der Installation — siehe oben"
     exit 1
