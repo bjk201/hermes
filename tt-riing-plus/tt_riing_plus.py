@@ -429,25 +429,47 @@ class TTController:
         return True
 
     def _init_controller(self):
-        """Send initialisation byte-stream to detect fan count per channel."""
+        """Send initialisation byte-stream to detect fan count per channel.
+
+        Thermaltake RGB Plus init protocol (from OpenRGB):
+          Step 1: 0x28 — magic init
+          Step 2: 0x29 — read config (fan counts)
+          After init, wait 1s before sending any color/speed commands.
+        """
         if self.test_mode:
             return
         tt_log("INFO", "Initializing controller (init1 + init2) ...")
-        # init step 1
-        self._send_raw(b'\x28\x01' + b'\x00' * 62)
-        # init step 2
-        self._send_raw(b'\x29\x02' + b'\x00' * 62)
-        time.sleep(0.3)
-        try:
-            resp = self.dev.read(self._in_ep or 0x81, 64, timeout=1000)
-            tt_log("DEBUG", f"Init response: {len(resp)} bytes — {resp[:32].hex()}")
-            if len(resp) >= 33:
-                self._fan_count = [min(max(resp[16 + i], 1), 5) for i in range(MAX_CHANNELS)]
-                tt_log("INFO", f"Fan counts per channel: {self._fan_count}")
-            else:
-                tt_log("WARNING", "Init response too short — using defaults")
-        except usb.core.USBError as e:
-            tt_log("WARNING", f"Init read failed: {e} — using defaults")
+
+        # Init step 1: [0x33][0x28][0x00][0x01][0x01][chk][0x00...]
+        init1 = bytes([0x33, 0x28, 0x00, 0x01, 0x01])
+        init1 += bytes([sum(init1) & 0xFF])
+        init1 += bytes(64 - len(init1))
+        self._send_raw(init1)
+
+        time.sleep(0.5)
+
+        # Init step 2: [0x33][0x29][0x00][0x02][0x02,0x00,0x00,0x00,0x00,0x00,0x00][chk][0x00...]
+        init2 = bytes([0x33, 0x29, 0x00, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        init2 += bytes([sum(init2) & 0xFF])
+        init2 += bytes(64 - len(init2))
+        self._send_raw(init2)
+
+        time.sleep(1.0)  # Controller needs time to process init
+
+        # Try to read init response (fan counts)
+        for attempt in range(3):
+            try:
+                resp = self.dev.read(self._in_ep or 0x81, 64, timeout=2000)
+                tt_log("DEBUG", f"Init response (attempt {attempt+1}): "
+                        f"{len(resp)} bytes — {resp[:32].hex()}")
+                if len(resp) >= 33:
+                    self._fan_count = [min(max(resp[16 + i], 1), 5)
+                                      for i in range(MAX_CHANNELS)]
+                    tt_log("INFO", f"Fan counts per channel: {self._fan_count}")
+                break
+            except usb.core.USBError as e:
+                tt_log("DEBUG", f"Init read attempt {attempt+1} failed: {e}")
+                time.sleep(0.5)
 
     def _send_raw(self, data: bytes):
         raw = data[:64].ljust(64, b'\x00')
@@ -497,17 +519,24 @@ class TTController:
         tt_log("INFO", f"set_speed ch={channel} percent={val}%")
         self._send_raw(pkt)
 
-    def set_mode(self, channel: int, mode: int, speed: int = 0x01, direction: int = 0x00):
-        """Set lighting effect mode for a channel."""
-        pkt = build_packet(CMD_SETMODE, channel, bytes([mode, speed, direction]))
+    def set_mode(self, channel: int, mode: int, effect_speed: int = 0x01, direction: int = 0x00):
+        """Set lighting effect mode for a channel.
+        effect_speed: 0=slow, 1=normal, 2=fast
+        direction: 0=left-to-right, 1=right-to-left
+        """
+        # TT RGB Plus expects 7 data bytes in mode packet
+        payload = bytes([mode, effect_speed, direction, 0x00, 0x00, 0x00, 0x00])
+        pkt = build_packet(CMD_SETMODE, channel, payload)
         mode_name = RGB_EFFECTS.get(mode, f"0x{mode:02x}")
-        tt_log("INFO", f"set_mode ch={channel} mode={mode_name} speed={speed} dir={direction}")
+        tt_log("INFO", f"set_mode ch={channel} mode={mode_name} "
+                f"effect_speed={effect_speed} dir={direction}")
         self._send_raw(pkt)
 
     def apply(self):
         """Push pending config to the controller."""
         tt_log("INFO", "apply() — pushing config to controller")
-        self._send_raw(build_packet(CMD_APPLY, 0x00, b''))
+        # TT RGB Plus expects 7 zero-bytes in apply packet
+        self._send_raw(build_packet(CMD_APPLY, 0x00, bytes(7)))
 
     def all_off(self):
         """Turn off all LEDs and stop all fans."""
