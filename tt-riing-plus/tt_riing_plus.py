@@ -175,34 +175,25 @@ FAN_SPEED_PRESETS = {
 }
 
 # ─────────────────────────────────────────────
-#  RGB Effects
+#  RGB Effects — Werte basierend auf OpenRGB ThermaltakeRiingController.h
+# FLOW=0, SPECTRUM=4, RIPPLE=8, BLINK=C, PULSE=10, WAVE=14, PER_LED=18, FULL=19
 # ─────────────────────────────────────────────
 RGB_EFFECTS = {
-    0x00: "Static",
-    0x01: "Breathing",
-    0x02: "Wave",
-    0x03: "Ripple",
-    0x04: "Pulse",
-    0x05: "Spectrum Cycle",
-    0x06: "Rainbow Wave",
-    0x07: "Reactive",
+    0x00: "Flow",
+    0x04: "Spectrum",
+    0x08: "Ripple",
+    0x0c: "Blink",
+    0x10: "Pulse",
+    0x14: "Wave",
+    0x18: "Per-LED",
+    0x19: "Full",
 }
 
-# Effect modes for CMD_SETMODE byte values
-# Per-TT-docs: byte[5]=mode, byte[6]=direction, byte[7]=speed
-MODE_STATIC   = 0x00
-MODE_BREATH   = 0x01
-MODE_WAVE     = 0x02
-MODE_RIPPLE   = 0x03
-MODE_PULSE    = 0x04
-MODE_SPECTRUM = 0x05
-MODE_RAINBOW  = 0x06
-MODE_REACTIVE = 0x07
-
 EFFECT_SPEED_MAP = {
-    "Slow":     0x00,
-    "Normal":   0x01,
-    "Fast":     0x02,
+    "Extreme": 0x00,
+    "Fast":  0x01,
+    "Normal":  0x02,
+    "Slow":    0x03,
 }
 
 # ─────────────────────────────────────────────
