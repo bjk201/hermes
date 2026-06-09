@@ -112,9 +112,10 @@ def tt_log(level: str, msg: str):
 TT_VID = 0x264a
 
 # Alle bekannten Thermaltake RGB-Controller PIDs (automatische Erkennung)
-# Quelle: OpenRGB, tt-rgb, Linux kernel HID
+# Quelle: OpenRGB, tt-rgb, Linux kernel HID, lsusb
 TT_CONTROLLERS = {
     0x1fa5: "Riing Plus",        # TT Riing Plus Digital Controller
+    0x1fa6: "Riing Plus)",       # TT Riing Plus (2. Controller / Hub)
     0x206e: "Flo 360",           # Thermaltake Flo 360 (AIO)
     0x206c: "TOUGHRGB",          # ToughRAM RGB Controller
     0x206b: "Riing Trio",        # Riing Trio Controller
@@ -408,7 +409,7 @@ class TTController:
             tt_log("ERROR", f"USB write failed: {e}")
 
     def _read_resp(self, timeout=1000) -> list:
-        if self.test_mode:
+        if self.test_mode or self.dev is None:
             return []
         try:
             resp = self.dev.read(0x81, 64, timeout=timeout)
