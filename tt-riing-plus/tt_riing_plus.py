@@ -27,6 +27,7 @@ import time
 import math
 import threading
 import logging
+import queue
 from functools import partial
 
 try:
@@ -94,17 +95,15 @@ _logger.info("TT Riing Plus Control started")
 _logger.info("Python %s | Platform: %s", sys.version.split()[0], sys.platform)
 _logger.info("usb=%s | qt=%s", HAS_USB, HAS_QT)
 
-_log_callback = None  # GUI sets this for live log forwarding
+# Thread-safe log queue — GUI polls this instead of callback from foreign threads
+_log_queue = queue.Queue()
+_log_callback = None  # kept for compat, but GUI uses QTimer + _log_queue
 
 
 def tt_log(level: str, msg: str):
-    """Thread-safe log — writes to file and notifies GUI log window."""
+    """Thread-safe log — writes to file and pushes to queue for GUI polling."""
     getattr(_logger, level.lower(), _logger.info)(msg)
-    if _log_callback:
-        try:
-            _log_callback(level.upper(), msg)
-        except Exception:
-            pass
+    _log_queue.put((level.upper(), msg))
 
 # ─────────────────────────────────────────────
 #  USB Protocol Constants
@@ -354,35 +353,51 @@ class TTController:
 
         tt_log("INFO", f"Detected: {detected_name} (PID {detected_pid:#06x})")
 
-        try:
-            if self.dev.is_kernel_driver_active(0):
-                tt_log("INFO", "Kernel driver active — detaching")
-                self.dev.detach_kernel_driver(0)
-                tt_log("INFO", "Kernel driver detached")
-        except (usb.core.USBError, NotImplementedError) as e:
-            tt_log("DEBUG", f"Kernel driver detach: {e}")
+        # ── USB Device Setup ──
+        # 1) Detach kernel driver on ALL interfaces
+        for cfg in self.dev:
+            for intf in cfg:
+                try:
+                    if self.dev.is_kernel_driver_active(intf.bInterfaceNumber):
+                        tt_log("INFO", f"Detaching kernel driver from iface {intf.bInterfaceNumber}")
+                        self.dev.detach_kernel_driver(intf.bInterfaceNumber)
+                except (usb.core.USBError, NotImplementedError):
+                    pass
 
+        # 2) Set configuration (try all available)
         try:
             self.dev.set_configuration()
             tt_log("INFO", "USB configuration set")
         except usb.core.USBError as e:
-            tt_log("WARNING", f"set_configuration failed (may be OK): {e}")
+            tt_log("WARNING", f"set_configuration failed: {e}")
+            # Try configuration 1 as fallback
+            try:
+                self.dev.set_configuration(1)
+                tt_log("INFO", "USB configuration 1 set (fallback)")
+            except usb.core.USBError as e2:
+                tt_log("WARNING", f"set_configuration(1) also failed: {e2}")
 
+        # 3) Claim interface 0
         self.cfg = self.dev.get_active_configuration()
         self.iface = self.cfg[(0, 0)]
-        # claim interface
         try:
             usb.util.claim_interface(self.dev, self.iface)
             tt_log("INFO", f"USB interface claimed (iface={self.iface.bInterfaceNumber})")
         except usb.core.USBError as e:
-            tt_log("WARNING", f"claim_interface failed (retrying after detach): {e}")
-            try:
-                if self.dev.is_kernel_driver_active(0):
-                    self.dev.detach_kernel_driver(0)
-                    usb.util.claim_interface(self.dev, self.iface)
-                    tt_log("INFO", "USB interface claimed after detach retry")
-            except Exception as e2:
-                tt_log("WARNING", f"claim_interface retry failed: {e2}")
+            tt_log("WARNING", f"claim_interface failed: {e}")
+
+        # 4) Log device info for debugging
+        try:
+            tt_log("DEBUG", f"Device: bus={self.dev.bus} addr={self.dev.address}")
+            tt_log("DEBUG", f"Config: {self.cfg.bConfigurationValue} "
+                    f"iface={self.iface.bInterfaceNumber} "
+                    f"alt={self.iface.bAlternateSetting}")
+            for ep in self.iface:
+                tt_log("DEBUG", f"  EP: 0x{ep.bEndpointAddress:02x} "
+                        f"type={ep.bmAttributes} "
+                        f"maxpacket={ep.wMaxPacketSize}")
+        except Exception as e:
+            tt_log("DEBUG", f"Device info error: {e}")
 
         self.ready = True
         self._init_controller()
@@ -751,28 +766,31 @@ class LogWindow(QDialog):
         self.log_text.setMaximumBlockCount(2000)
         lay.addWidget(self.log_text)
 
-        # Register as callback
-        global _log_callback
-        _log_callback = self._add_line
+        # Poll log queue via QTimer (thread-safe — runs on GUI thread)
+        self._log_timer = QTimer(self)
+        self._log_timer.timeout.connect(self._poll_log_queue)
+        self._log_timer.start(200)  # ms
 
-    def _add_line(self, level: str, msg: str):
-        colors = {
-            "DEBUG":    "#888",
-            "INFO":     "#aaa",
-            "WARNING":  "#f39c12",
-            "ERROR":    "#e74c3c",
-        }
-        color = colors.get(level, "#aaa")
-        import datetime
-        ts = datetime.datetime.now().strftime("%H:%M:%S")
-        line = f'<span style="color:#666">{ts}</span>  ' \
-               f'<span style="color:{color}">[{level:>7}]</span>  ' \
-               f'<span style="color:{color}">{msg}</span>'
-        # Must append from GUI thread — use metaObject invoke if needed
-        try:
+    def _poll_log_queue(self):
+        """Drain the log queue — called on GUI thread via QTimer."""
+        while True:
+            try:
+                level, msg = _log_queue.get_nowait()
+            except queue.Empty:
+                break
+            colors = {
+                "DEBUG":    "#888",
+                "INFO":     "#aaa",
+                "WARNING":  "#f39c12",
+                "ERROR":    "#e74c3c",
+            }
+            color = colors.get(level, "#aaa")
+            import datetime
+            ts = datetime.datetime.now().strftime("%H:%M:%S")
+            line = (f'<span style="color:#666">{ts}</span>  '
+                    f'<span style="color:{color}">[{level:>7}]</span>  '
+                    f'<span style="color:{color}">{msg}</span>')
             self.log_text.appendHtml(line)
-        except Exception:
-            pass
 
     def _clear(self):
         self.log_text.clear()
@@ -785,7 +803,7 @@ class LogWindow(QDialog):
             tt_log("INFO", f"Log saved to {path}")
 
     def _refilter(self):
-        # Re-read from log file (simple approach)
+        # Re-read from log file
         level = self.level_filter.currentText()
         self.log_text.clear()
         if not os.path.exists(LOG_FILE):
@@ -795,10 +813,7 @@ class LogWindow(QDialog):
             for line in f:
                 line = line.rstrip()
                 if level != "Alle" and f"[{level:>7}]" not in line:
-                    if level == "ERROR" and "[WARNING]" in line:
-                        pass  # keep warnings when filtering for errors? no.
-                    else:
-                        continue
+                    continue
                 color = "#aaa"
                 for lvl, c in colors.items():
                     if f"[{lvl:>7}]" in line:
@@ -813,8 +828,7 @@ class LogWindow(QDialog):
                 )
 
     def closeEvent(self, event):
-        global _log_callback
-        _log_callback = None
+        self._log_timer.stop()
         event.accept()
 
 
