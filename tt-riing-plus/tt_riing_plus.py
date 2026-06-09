@@ -26,6 +26,7 @@ import struct
 import time
 import math
 import threading
+import logging
 from functools import partial
 
 try:
@@ -40,13 +41,56 @@ try:
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QLabel, QSlider, QPushButton, QComboBox, QColorDialog,
         QGroupBox, QGridLayout, QSpinBox, QTabWidget, QStatusBar,
-        QCheckBox, QFrame, QScrollArea, QMessageBox, QFileDialog
+        QCheckBox, QFrame, QScrollArea, QMessageBox, QFileDialog,
+        QDialog, QTextEdit, QPlainTextEdit
     )
-    from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
+    from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
     from PyQt5.QtGui import QColor, QPainter, QBrush, QPen, QFont, QPixmap, QIcon
     HAS_QT = True
 except ImportError:
     HAS_QT = False
+
+# ─────────────────────────────────────────────
+#  Logging Setup (after HAS_USB/HAS_QT known)
+# ─────────────────────────────────────────────
+LOG_DIR = os.path.join(os.path.expanduser("~"), ".config", "tt-riing-plus")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "tt-riing-plus.log")
+
+_logger = logging.getLogger("tt-riing-plus")
+_logger.setLevel(logging.DEBUG)
+
+# File handler — captures everything
+_fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+_fh.setLevel(logging.DEBUG)
+_fh.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)-7s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+))
+_logger.addHandler(_fh)
+
+# Console handler — INFO+
+_ch = logging.StreamHandler()
+_ch.setLevel(logging.INFO)
+_ch.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+_logger.addHandler(_ch)
+
+_logger.info("=" * 60)
+_logger.info("TT Riing Plus Control started")
+_logger.info("Python %s | Platform: %s", sys.version.split()[0], sys.platform)
+_logger.info("usb=%s | qt=%s", HAS_USB, HAS_QT)
+_logger.info("Log file: %s", LOG_FILE)
+
+_log_callback = None  # GUI sets this for live log forwarding
+
+
+def tt_log(level: str, msg: str):
+    """Thread-safe log — writes to file and notifies GUI log window."""
+    getattr(_logger, level.lower(), _logger.info)(msg)
+    if _log_callback:
+        try:
+            _log_callback(level.upper(), msg)
+        except Exception:
+            pass
 
 # ─────────────────────────────────────────────
 #  USB Protocol Constants
@@ -153,31 +197,135 @@ class TTController:
         self.iface = None
         self.ready = False
         self.test_mode = test_mode
-        self._fan_count = [1] * MAX_CHANNELS   # default 1 fan per channel
+        self._fan_count = [1] * MAX_CHANNELS
+        self._detected_pid = None
+        self._detected_name = None
 
         if not test_mode:
             self.connect()
+
+    # ── USB Diagnostic ──
+    def diagnose(self) -> str:
+        """
+        Umfassende USB-Diagnose — prüft pyusb, udev, Berechtigungen,
+        und listet alle USB-Geräte auf.
+        """
+        lines = []
+        lines.append("=" * 50)
+        lines.append("  USB DIAGNOSE")
+        lines.append("=" * 50)
+
+        # 1. pyusb verfügbar?
+        lines.append(f"\n[1] pyusb: {'OK' if HAS_USB else 'FEHLEND'}")
+        if not HAS_USB:
+            lines.append("    → pip3 install pyusb")
+            return "\n".join(lines)
+
+        # 2. Alle bekannten PIDs durchprobieren
+        lines.append(f"\n[2] Suche nach bekannten Controllers (VID={TT_VID:#06x}):")
+        found_any = False
+        for pid, name in TT_CONTROLLERS.items():
+            dev = usb.core.find(idVendor=TT_VID, idProduct=pid)
+            status = "✅ GEFUNDEN" if dev else "—"
+            lines.append(f"    PID {pid:#06x} ({name}): {status}")
+            if dev is not None:
+                found_any = True
+                try:
+                    manufacturer = usb.util.get_string(dev, dev.iManufacturer)
+                    product      = usb.util.get_string(dev, dev.iProduct)
+                    serial       = usb.util.get_string(dev, dev.iSerialNumber)
+                    lines.append(f"      Manufacturer: {manufacturer}")
+                    lines.append(f"      Product:      {product}")
+                    lines.append(f"      Serial:       {serial}")
+                    lines.append(f"      Bus:          {dev.bus}")
+                    lines.append(f"      Address:      {dev.address}")
+                except Exception as e:
+                    lines.append(f"      Info-Lesefehler: {e}")
+
+        if not found_any:
+            lines.append("\n    ⚠️ Kein bekannter Controller gefunden!")
+
+        # 3. Liste alle USB-Geräte auf mit VID 0x264a
+        lines.append(f"\n[3] Alle USB-Geräte mit VID {TT_VID:#06x}:")
+        try:
+            tt_devices = list(usb.core.find(find_all=True, idVendor=TT_VID))
+            if not tt_devices:
+                lines.append("    Keine gefunden!")
+            for d in tt_devices:
+                pid = d.idProduct
+                name = TT_CONTROLLERS.get(pid, "UNBEKANNT")
+                lines.append(f"    PID {pid:#06x} ({name}) Bus={d.bus} Addr={d.address}")
+        except Exception as e:
+            lines.append(f"    Fehler beim Scannen: {e}")
+
+        # 4. Liste ALL-USB devices (falls der Controller eine andere VID hat)
+        lines.append("\n[4] Alle angeschlossenen USB-Geräte (VID:PID):")
+        try:
+            all_devs = list(usb.core.find(find_all=True))
+            if not all_devs:
+                lines.append("    Keine USB-Geräte sichtbar!")
+            for d in all_devs[:20]:
+                vid = d.idVendor
+                pid = d.idProduct
+                mfg = ""
+                try:
+                    mfg = usb.util.get_string(d, d.iManufacturer)
+                except Exception:
+                    mfg = "?"
+                lines.append(f"    {vid:#06x}:{pid:#06x}  {mfg}")
+            if len(all_devs) > 20:
+                lines.append(f"    ... und {len(all_devs)-20} weitere")
+        except usb.core.USBError as e:
+            lines.append(f"    Fehler beim Scannen: {e}")
+            if "Access denied" in str(e):
+                lines.append("    ⚠️ BERECHTIGUNG PROBLEM!")
+                lines.append("    → sudo erforderlich oder udev-Regel fehlt")
+
+        # 5. Kernel-Driver Check
+        lines.append("\n[5] Kernel-Driver-Status:")
+        try:
+            dev_test = usb.core.find(idVendor=TT_VID)
+            if dev_test:
+                for cfg in dev_test:
+                    for intf in cfg:
+                        active = dev_test.is_kernel_driver_active(intf.bInterfaceNumber)
+                        lines.append(f"    Interface {intf.bInterfaceNumber}: "
+                                     f"{'kernel driver ACTIVE' if active else 'frei'}")
+            else:
+                lines.append("    Nicht prüfbar — kein Gerät gefunden")
+        except Exception as e:
+            lines.append(f"    Fehler beim Prüfen: {e}")
+
+        lines.append("\n" + "=" * 50)
+        return "\n".join(lines)
 
     # ── device plumbing ──
     def _find_device(self):
         """
         Automatische Erkennung: durchsucht alle bekannten TT PIDs.
         Gibt (device, pid, name) oder (None, None, None) zurück.
+        Logs each attempt.
         """
         for pid, name in TT_CONTROLLERS.items():
+            tt_log("DEBUG", f"Trying PID {pid:#06x} ({name}) ...")
             dev = usb.core.find(idVendor=TT_VID, idProduct=pid)
             if dev is not None:
+                tt_log("INFO", f"Found controller: {name} (PID {pid:#06x}) "
+                        f"Bus={dev.bus} Addr={dev.address}")
                 return dev, pid, name
+        tt_log("WARNING", "No known Thermaltake controller found on USB bus")
         return None, None, None
 
     def connect(self) -> bool:
         if not HAS_USB:
+            tt_log("ERROR", "pyusb not available — USB disabled")
             self.test_mode = True
             return False
 
         # Automatisch alle bekannten Controller-PIDs durchprobieren
         self.dev, detected_pid, detected_name = self._find_device()
         if self.dev is None:
+            tt_log("ERROR", "Controller not found — entering test mode")
             self.test_mode = True
             return False
 
@@ -185,62 +333,75 @@ class TTController:
         self._detected_pid = detected_pid
         self._detected_name = detected_name
 
+        tt_log("INFO", f"Detected: {detected_name} (PID {detected_pid:#06x})")
+
         try:
             if self.dev.is_kernel_driver_active(0):
+                tt_log("INFO", "Kernel driver active — detaching")
                 self.dev.detach_kernel_driver(0)
-        except (usb.core.USBError, NotImplementedError):
-            pass
+        except (usb.core.USBError, NotImplementedError) as e:
+            tt_log("DEBUG", f"Kernel driver detach: {e}")
 
         try:
             self.dev.set_configuration()
-        except usb.core.USBError:
-            pass
+            tt_log("INFO", "USB configuration set")
+        except usb.core.USBError as e:
+            tt_log("WARNING", f"set_configuration failed: {e}")
 
         self.cfg  = self.dev.get_active_configuration()
         self.iface = self.cfg[(0, 0)]
         # claim interface
         try:
             usb.util.claim_interface(self.dev, self.iface)
-        except usb.core.USBError:
-            pass
+            tt_log("INFO", f"USB interface claimed (iface={self.iface.bInterfaceNumber})")
+        except usb.core.USBError as e:
+            tt_log("WARNING", f"claim_interface failed: {e}")
 
         self.ready = True
         self._init_controller()
+        tt_log("INFO", "Controller connected and initialized")
         return True
 
     def _init_controller(self):
         """Send initialisation byte-stream to detect fan count per channel."""
         if self.test_mode:
             return
+        tt_log("INFO", "Initializing controller (init1 + init2) ...")
         # init step 1
-        self._send_raw(b'\x28\x01' + b'\x00' * 62)  # bytes 0-63, len=64
+        self._send_raw(b'\x28\x01' + b'\x00' * 62)
         # init step 2
         self._send_raw(b'\x29\x02' + b'\x00' * 62)
         time.sleep(0.3)
         try:
             resp = self.dev.read(0x81, 64, timeout=1000)
+            tt_log("DEBUG", f"Init response: {len(resp)} bytes — {resp[:32].hex()}")
             if len(resp) >= 33:
-                # bytes [16..20] encode fan count per channel
                 self._fan_count = [min(max(resp[16 + i], 1), 5) for i in range(MAX_CHANNELS)]
-        except usb.core.USBError:
-            pass  # fall back to defaults
+                tt_log("INFO", f"Fan counts per channel: {self._fan_count}")
+            else:
+                tt_log("WARNING", "Init response too short — using defaults")
+        except usb.core.USBError as e:
+            tt_log("WARNING", f"Init read failed: {e} — using defaults")
 
     def _send_raw(self, data: bytes):
         raw = data[:64].ljust(64, b'\x00')
         if self.test_mode:
             return
         try:
-            self.dev.write(0x02, raw, timeout=1000)
+            written = self.dev.write(0x02, raw, timeout=1000)
+            tt_log("DEBUG", f"USB write: {written}/64 bytes")
         except usb.core.USBError as e:
-            if os.getenv("TT_DEBUG"):
-                print(f"[TT USB-Err] {e}")
+            tt_log("ERROR", f"USB write failed: {e}")
 
     def _read_resp(self, timeout=1000) -> list:
         if self.test_mode:
             return []
         try:
-            return self.dev.read(0x81, 64, timeout=timeout)
-        except usb.core.USBError:
+            resp = self.dev.read(0x81, 64, timeout=timeout)
+            tt_log("DEBUG", f"USB read: {len(resp)} bytes")
+            return resp
+        except usb.core.USBError as e:
+            tt_log("WARNING", f"USB read failed: {e}")
             return []
 
     # ── public API ──
@@ -252,33 +413,34 @@ class TTController:
         """
         Set per-LED colors on one channel.
         `colors` is a list of (R, G, B) tuples, length <= LEDS_PER_FAN.
-        The controller expects packed GRB (not RGB!) per LED.
+        The controller expects packed BGR per LED.
         """
         payload = bytearray()
         for r, g, b in colors[:LEDS_PER_FAN]:
-            payload += bytes([b, g, r])   # Thermaltake uses BGR order
-        # pad to exactly LEDS_PER_FAN * 3 bytes
+            payload += bytes([b, g, r])
         while len(payload) < LEDS_PER_FAN * 3:
             payload += b'\x00'
         pkt = build_packet(CMD_SETCOLOR, channel, bytes(payload))
+        tt_log("INFO", f"set_color ch={channel} first_color=({colors[0] if colors else '?'})")
         self._send_raw(pkt)
 
     def set_speed(self, channel: int, percent: int):
-        """
-        Set PWM fan speed for one channel (0-100 %).
-        Thermaltake expects 0x00 (off) .. 0x64 (100 %).
-        """
+        """Set PWM fan speed for one channel (0-100 %)."""
         val = max(0, min(100, percent))
         pkt = build_packet(CMD_SETSPEED, channel, bytes([val]))
+        tt_log("INFO", f"set_speed ch={channel} percent={val}%")
         self._send_raw(pkt)
 
     def set_mode(self, channel: int, mode: int, speed: int = 0x01, direction: int = 0x00):
         """Set lighting effect mode for a channel."""
         pkt = build_packet(CMD_SETMODE, channel, bytes([mode, speed, direction]))
+        mode_name = RGB_EFFECTS.get(mode, f"0x{mode:02x}")
+        tt_log("INFO", f"set_mode ch={channel} mode={mode_name} speed={speed} dir={direction}")
         self._send_raw(pkt)
 
     def apply(self):
         """Push pending config to the controller."""
+        tt_log("INFO", "apply() — pushing config to controller")
         self._send_raw(build_packet(CMD_APPLY, 0x00, b''))
 
     def all_off(self):
@@ -513,6 +675,183 @@ class ChannelControl(QWidget):
 
 
 # ─────────────────────────────────────────────
+#  Log Window (live log viewer)
+# ─────────────────────────────────────────────
+class LogWindow(QDialog):
+    """Floating log window — shows live tt_log output."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("🔍 TT Riing Plus — Log")
+        self.setMinimumSize(750, 500)
+        self.setStyleSheet("""
+            QDialog { background: #1e1e1e; }
+            QTextEdit { background: #0d0d0d; color: #aaa; font-family: monospace; font-size: 12px; border: none; }
+        """)
+
+        lay = QVBoxLayout(self)
+
+        # Controls
+        ctrl = QHBoxLayout()
+        clear_btn = QPushButton("🗑 Leeren")
+        clear_btn.clicked.connect(self._clear)
+        ctrl.addWidget(clear_btn)
+
+        save_btn = QPushButton("💾 Speichern")
+        save_btn.clicked.connect(self._save_log)
+        ctrl.addWidget(save_btn)
+
+        self.level_filter = QComboBox()
+        self.level_filter.addItems(["Alle", "INFO", "WARNING", "ERROR", "DEBUG"])
+        self.level_filter.currentTextChanged.connect(self._refilter)
+        ctrl.addWidget(QLabel("Filter:"))
+        ctrl.addWidget(self.level_filter)
+
+        ctrl.addStretch()
+        close_btn = QPushButton("✕ Schließen")
+        close_btn.clicked.connect(self.close)
+        ctrl.addWidget(close_btn)
+        lay.addLayout(ctrl)
+
+        # Log text
+        self.log_text = QPlainTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.log_text.setMaximumBlockCount(2000)
+        lay.addWidget(self.log_text)
+
+        # Register as callback
+        global _log_callback
+        _log_callback = self._add_line
+
+    def _add_line(self, level: str, msg: str):
+        colors = {
+            "DEBUG":    "#888",
+            "INFO":     "#aaa",
+            "WARNING":  "#f39c12",
+            "ERROR":    "#e74c3c",
+        }
+        color = colors.get(level, "#aaa")
+        import datetime
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        line = f'<span style="color:#666">{ts}</span>  ' \
+               f'<span style="color:{color}">[{level:>7}]</span>  ' \
+               f'<span style="color:{color}">{msg}</span>'
+        # Must append from GUI thread — use metaObject invoke if needed
+        try:
+            self.log_text.appendHtml(line)
+        except Exception:
+            pass
+
+    def _clear(self):
+        self.log_text.clear()
+
+    def _save_log(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Log speichern", LOG_FILE, "Log (*.log *.txt)")
+        if path:
+            with open(path, "w") as f:
+                f.write(self.log_text.toPlainText())
+            tt_log("INFO", f"Log saved to {path}")
+
+    def _refilter(self):
+        # Re-read from log file (simple approach)
+        level = self.level_filter.currentText()
+        self.log_text.clear()
+        if not os.path.exists(LOG_FILE):
+            return
+        colors = {"DEBUG": "#888", "INFO": "#aaa", "WARNING": "#f39c12", "ERROR": "#e74c3c"}
+        with open(LOG_FILE) as f:
+            for line in f:
+                line = line.rstrip()
+                if level != "Alle" and f"[{level:>7}]" not in line:
+                    if level == "ERROR" and "[WARNING]" in line:
+                        pass  # keep warnings when filtering for errors? no.
+                    else:
+                        continue
+                color = "#aaa"
+                for lvl, c in colors.items():
+                    if f"[{lvl:>7}]" in line:
+                        color = c
+                        break
+                ts_end = line.find("]") + 1 if "]" in line else 0
+                ts = line[:ts_end]
+                rest = line[ts_end:]
+                self.log_text.appendHtml(
+                    f'<span style="color:#666">{ts}</span>'
+                    f'<span style="color:{color}">{rest}</span>'
+                )
+
+    def closeEvent(self, event):
+        global _log_callback
+        _log_callback = None
+        event.accept()
+
+
+# ─────────────────────────────────────────────
+#  Diagnostic Dialog
+# ─────────────────────────────────────────────
+class DiagnosticDialog(QDialog):
+    """Shows output of controller.diagnose() for USB troubleshooting."""
+
+    def __init__(self, controller: TTController, parent=None):
+        super().__init__(parent)
+        self.controller = controller
+        self.setWindowTitle("🔍 USB Diagnose")
+        self.setMinimumSize(700, 500)
+        self.setStyleSheet("""
+            QDialog { background: #2b2b2b; color: #e0e0e0; }
+            QTextEdit { background: #0d0d0d; color: #2ecc71; font-family: monospace; font-size: 11px; }
+            QPushButton { background: #3a3a3a; padding: 6px 12px; border-radius: 4px; }
+        """)
+
+        lay = QVBoxLayout(self)
+
+        info = QLabel(
+            "USB-Hilfsdiagnose — zeigt alle gefundenen USB-Geräte, "
+            "Berechtigungen und Kernel-Driver-Status."
+        )
+        info.setWordWrap(True)
+        lay.addWidget(info)
+
+        self.output = QPlainTextEdit()
+        self.output.setReadOnly(True)
+        lay.addWidget(self.output)
+
+        btn_row = QHBoxLayout()
+        run_btn = QPushButton("🔄 Neu scannen")
+        run_btn.clicked.connect(self._run)
+        btn_row.addWidget(run_btn)
+
+        save_btn = QPushButton("💾 Als Datei speichern")
+        save_btn.clicked.connect(self._save)
+        btn_row.addWidget(save_btn)
+
+        btn_row.addStretch()
+        close_btn = QPushButton("✕ Schließen")
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+
+        self._run()
+
+    def _run(self):
+        self.output.setPlainText("Scanne USB-Bus ...\n")
+        QApplication.processEvents()
+        # Run in thread to avoid blocking GUI
+        def _do():
+            result = self.controller.diagnose()
+            # Use signal to update GUI
+            self.output.setPlainText(result)
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _save(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Diagnose speichern", "tt-diagnose.txt", "Text (*.txt)")
+        if path:
+            with open(path, "w") as f:
+                f.write(self.output.toPlainText())
+
+
+# ─────────────────────────────────────────────
 #  Main Window
 # ─────────────────────────────────────────────
 class MainWindow(QMainWindow):
@@ -603,6 +942,14 @@ class MainWindow(QMainWindow):
         self.help_btn.clicked.connect(self._show_help)
         gl.addWidget(self.help_btn)
 
+        self.log_btn = QPushButton("📋 Log")
+        self.log_btn.clicked.connect(self._show_log)
+        gl.addWidget(self.log_btn)
+
+        self.diag_btn = QPushButton("🔍 Diagnose")
+        self.diag_btn.clicked.connect(self._show_diagnose)
+        gl.addWidget(self.diag_btn)
+
         gl.addStretch()
         global_group.setLayout(gl)
         main_layout.addWidget(global_group)
@@ -644,6 +991,16 @@ class MainWindow(QMainWindow):
             "<b>Automatische Erkennung:</b> Die App probiert alle bekannten PIDs durch "
             "und zeigt den gefundenen Controller im Header an."
         )
+
+    def _show_log(self):
+        """Open the live log viewer dialog."""
+        dlg = LogWindow(self)
+        dlg.exec_()
+
+    def _show_diagnose(self):
+        """Open the USB diagnostic dialog."""
+        dlg = DiagnosticDialog(self.controller, self)
+        dlg.exec_()
 
     def closeEvent(self, event):
         self.controller.close()
