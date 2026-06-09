@@ -71,7 +71,7 @@ def _safe_logging_setup():
     ch.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
     logger.addHandler(ch)
 
-    # File handler — may fail if ~/.config is missing / unwritable / disk full
+    log_path = None
     try:
         log_dir = os.path.join(os.path.expanduser("~"), ".config", "tt-riing-plus")
         os.makedirs(log_dir, exist_ok=True)
@@ -87,7 +87,7 @@ def _safe_logging_setup():
     except Exception as e:
         logger.warning("File logging disabled: %s", e)
 
-    return logger, log_path if 'log_path' in dir() else None
+    return logger, log_path
 
 
 _logger, LOG_FILE = _safe_logging_setup()
@@ -386,16 +386,40 @@ class TTController:
         except usb.core.USBError as e:
             tt_log("WARNING", f"claim_interface failed: {e}")
 
-        # 4) Log device info for debugging
+        # 4) Find OUT endpoint dynamically (don't hardcode 0x02)
+        self._out_ep = None
+        self._in_ep = None
+        for ep in self.iface:
+            if ep.bEndpointAddress & 0x80 == 0:
+                self._out_ep = ep.bEndpointAddress
+            else:
+                self._in_ep = ep.bEndpointAddress
+
+        if self._out_ep is None:
+            # No OUT on iface 0 — try iface 1
+            tt_log("WARNING", "No OUT endpoint on iface 0 — trying iface 1")
+            try:
+                self.iface = self.cfg[(1, 0)]
+                usb.util.claim_interface(self.dev, self.iface)
+                for ep in self.iface:
+                    if ep.bEndpointAddress & 0x80 == 0:
+                        self._out_ep = ep.bEndpointAddress
+                    else:
+                        self._in_ep = ep.bEndpointAddress
+            except Exception as e:
+                tt_log("WARNING", f"Failed to claim iface 1: {e}")
+
+        if self._out_ep is None:
+            tt_log("WARNING", "No OUT endpoint found — using 0x00")
+            self._out_ep = 0x00
+
+        tt_log("DEBUG", f"OUT ep: 0x{self._out_ep:02x}  IN ep: 0x{self._in_ep or 0:02x}")
+
         try:
             tt_log("DEBUG", f"Device: bus={self.dev.bus} addr={self.dev.address}")
             tt_log("DEBUG", f"Config: {self.cfg.bConfigurationValue} "
                     f"iface={self.iface.bInterfaceNumber} "
                     f"alt={self.iface.bAlternateSetting}")
-            for ep in self.iface:
-                tt_log("DEBUG", f"  EP: 0x{ep.bEndpointAddress:02x} "
-                        f"type={ep.bmAttributes} "
-                        f"maxpacket={ep.wMaxPacketSize}")
         except Exception as e:
             tt_log("DEBUG", f"Device info error: {e}")
 
@@ -415,7 +439,7 @@ class TTController:
         self._send_raw(b'\x29\x02' + b'\x00' * 62)
         time.sleep(0.3)
         try:
-            resp = self.dev.read(0x81, 64, timeout=1000)
+            resp = self.dev.read(self._in_ep or 0x81, 64, timeout=1000)
             tt_log("DEBUG", f"Init response: {len(resp)} bytes — {resp[:32].hex()}")
             if len(resp) >= 33:
                 self._fan_count = [min(max(resp[16 + i], 1), 5) for i in range(MAX_CHANNELS)]
@@ -430,7 +454,7 @@ class TTController:
         if self.test_mode or self.dev is None:
             return
         try:
-            written = self.dev.write(0x02, raw, timeout=1000)
+            written = self.dev.write(self._out_ep, raw, timeout=1000)
             tt_log("DEBUG", f"USB write: {written}/64 bytes")
         except Exception as e:
             tt_log("ERROR", f"USB write failed: {e}")
@@ -439,7 +463,7 @@ class TTController:
         if self.test_mode or self.dev is None:
             return []
         try:
-            resp = self.dev.read(0x81, 64, timeout=timeout)
+            resp = self.dev.read(self._in_ep or 0x81, 64, timeout=timeout)
             tt_log("DEBUG", f"USB read: {len(resp)} bytes")
             return resp
         except usb.core.USBError as e:
@@ -882,12 +906,14 @@ class DiagnosticDialog(QDialog):
     def _run(self):
         self.output.setPlainText("Scanne USB-Bus ...\n")
         QApplication.processEvents()
-        # Run in thread to avoid blocking GUI
-        def _do():
+        # Run synchronously on GUI thread — avoids thread-safety issues
+        # with Qt widget access from foreign threads (which causes segfault).
+        # The USB scan takes ~1-2s max.
+        try:
             result = self.controller.diagnose()
-            # Use signal to update GUI
             self.output.setPlainText(result)
-        threading.Thread(target=_do, daemon=True).start()
+        except Exception as e:
+            self.output.setPlainText(f"FEHLER bei der Diagnose:\n{e}")
 
     def _save(self):
         path, _ = QFileDialog.getSaveFileName(self, "Diagnose speichern", "tt-diagnose.txt", "Text (*.txt)")
