@@ -430,10 +430,14 @@ class TTController:
         try:
             # HID report: 1 byte report ID (0x00) + 64 bytes data = 65 bytes total
             hid_report = b'\x00' + raw
-            written = os.write(self.dev, hid_report)
-            tt_log("DEBUG", f"hidraw write: {written}/65 bytes")
+            # Use HIDIOCSFEATURE ioctl for SET_REPORT — required for Thermaltake controllers
+            # _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x06, len) = 0xC0084806 for SET_FEATURE
+            import ctypes
+            buf = ctypes.create_string_buffer(hid_report)
+            ret = fcntl.ioctl(self.dev, 0xC0084806, buf)  # HIDIOCSFEATURE
+            tt_log("DEBUG", f"HIDIOCSFEATURE sent: {ret}")
         except Exception as e:
-            tt_log("ERROR", f"hidraw write failed: {e}")
+            tt_log("ERROR", f"HIDIOCSFEATURE failed: {e}")
 
     def _read_resp(self, timeout=1000) -> bytes:
         if self.test_mode or self.dev is None:
@@ -445,18 +449,27 @@ class TTController:
             return b''
 
     def _hidraw_read(self, size: int, timeout: int = 1000) -> bytes:
-        """Read from hidraw device with timeout (ms)."""
+        """Read from hidraw device using HIDIOCGFEATURE ioctl."""
+        import ctypes
         import select
         fd = self.dev
+        # Use select for timeout
         ready, _, _ = select.select([fd], [], [], timeout / 1000.0)
         if not ready:
             return b''
-        data = os.read(fd, size)
-        tt_log("DEBUG", f"hidraw read: {len(data)} bytes")
-        # Strip report ID (first byte) and return 64 bytes
-        if len(data) == 65:
-            return data[1:]
-        return bytes(data)
+        # HIDIOCGFEATURE: _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x07, len) = 0xC0084807
+        buf = ctypes.create_string_buffer(size)
+        try:
+            fcntl.ioctl(fd, 0xC0084807, buf)  # HIDIOCGFEATURE
+            data = buf.raw[:size]
+            tt_log("DEBUG", f"HIDIOCGFEATURE read: {len(data)} bytes")
+            # Strip report ID (first byte) and return 64 bytes
+            if len(data) == 65:
+                return data[1:]
+            return data
+        except Exception as e:
+            tt_log("WARNING", f"HIDIOCGFEATURE failed: {e}")
+            return b''
 
     # ── public API ──
     @property
