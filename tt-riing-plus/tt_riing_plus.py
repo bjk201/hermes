@@ -41,22 +41,21 @@ try:
 except ImportError:
     HAS_USB = False
 
-# hidraw support — preferred over pyusb for Thermaltake controllers
-# The Linux kernel exposes these as /dev/hidraw* (HID class), not raw USB
+# hidraw support — used to identify the correct /dev/hidraw* device
+# The Thermaltake controller is a USB HID device. We use hidraw only for
+# device identification; actual communication is via pyusb (libusb) which
+# can detach the kernel HID driver and claim the USB interface directly.
 HAS_HIDRAW = False
 try:
     import fcntl
     import ctypes
-    import ctypes.util
-    # HIDIOCGRAWINFO = _IOR('H', 0x03, struct hidraw_devinfo)
-    # struct hidraw_devinfo { s32 bustype; s16 vendor; s16 product; }
     class HidrawDevinfo(ctypes.Structure):
         _fields_ = [
             ("bustype", ctypes.c_int32),
             ("vendor",  ctypes.c_int16),
             ("product", ctypes.c_int16),
         ]
-    _HIDIOCGRAWINFO = 0x80084803  # _IOC(_IOC_READ, 'H', 0x03, 8)
+    _HIDIOCGRAWINFO = 0x80084803
     HAS_HIDRAW = True
 except Exception:
     pass
@@ -108,7 +107,7 @@ def _safe_logging_setup():
 _logger, LOG_FILE = _safe_logging_setup()
 _logger.info("TT Riing Plus Control started")
 _logger.info("Python %s | Platform: %s", sys.version.split()[0], sys.platform)
-_logger.info("hidraw=%s | qt=%s", HAS_HIDRAW, HAS_QT)
+_logger.info("pyusb=%s | qt=%s", HAS_USB, HAS_QT)
 
 # Thread-safe log queue — GUI polls this instead of callback from foreign threads
 _log_queue = queue.Queue()
@@ -217,17 +216,16 @@ def build_packet(cmd: int, channel: int, payload: bytes) -> bytes:
 class TTController:
     """
     Low-level USB communication with the Thermaltake Riing Plus controller.
-    Manages device discovery, initialisation, and command dispatch.
+    Uses pyusb (libusb) as primary backend — finds the controller on the USB bus,
+    detaches the kernel HID driver, and claims the USB interface directly.
+    hidraw is used for diagnostic display only.
     """
 
     def __init__(self, test_mode=False):
-        self.dev = None      # hidraw: file descriptor (int); pyusb: usb device
-        self.cfg = None
+        self.dev = None       # pyusb device
         self.iface = None
         self.ready = False
         self.test_mode = test_mode
-        self._backend = None  # 'hidraw' or 'pyusb'
-        self._hidraw_path = None
         self._fan_count = [1] * MAX_CHANNELS
         self._detected_pid = None
         self._detected_name = None
@@ -235,7 +233,7 @@ class TTController:
         if not test_mode:
             self.connect()
 
-    # ── hidraw helpers ──
+    # ── hidraw helpers (diagnostic only) ──
     @staticmethod
     def _hidraw_get_info(path: str):
         """Get (VID, PID) from a hidraw device via ioctl HIDIOCGRAWINFO."""
@@ -250,76 +248,55 @@ class TTController:
         except Exception:
             return None, None
 
-    @staticmethod
-    def _find_hidraw_controller():
-        """
-        Scan /dev/hidraw* for a Thermaltake controller.
-        Returns (path, pid, name) or (None, None, None).
-        """
-        if not HAS_HIDRAW:
-            return None, None, None
-        try:
-            hidraw_devs = sorted([
-                os.path.join("/dev", n)
-                for n in os.listdir("/dev")
-                if n.startswith("hidraw")
-            ])
-        except Exception:
-            return None, None, None
-
-        for path in hidraw_devs:
-            vid, pid = TTController._hidraw_get_info(path)
-            if vid == TT_VID and pid in TT_CONTROLLERS:
-                return path, pid, TT_CONTROLLERS[pid]
-
-        # Second pass: any device with matching VID (even unknown PID)
-        for path in hidraw_devs:
-            vid, pid = TTController._hidraw_get_info(path)
-            if vid == TT_VID:
-                return path, pid, f"Unknown TT (PID {pid:#06x})"
-
-        return None, None, None
-
     # ── USB Diagnostic ──
     def diagnose(self) -> str:
         """
-        Umfassende HID-Diagnose — prüft hidraw, Berechtigungen,
-        und listet alle hidraw-Geräte auf.
+        Umfassende USB/HID-Diagnose — prüft pyusb, hidraw, Berechtigungen.
         """
         lines = []
         lines.append("=" * 50)
         lines.append("  USB DIAGNOSE (HID)")
         lines.append("=" * 50)
 
-        # 1. hidraw verfügbar?
-        lines.append(f"\n[1] hidraw: {'OK' if HAS_HIDRAW else 'FEHLEND'}")
-        if not HAS_HIDRAW:
-            lines.append("    → ctypes/fcntl nicht verfügbar")
+        # 1. pyusb verfügbar?
+        lines.append(f"\n[1] pyusb: {'OK' if HAS_USB else 'FEHLEND'}")
+        if not HAS_USB:
+            lines.append("    → pip3 install pyusb")
 
-        # 2. Suche nach bekannten Controllers via hidraw
-        lines.append(f"\n[2] Suche nach bekannten Controllers (VID={TT_VID:#06x}):")
+        # 2. hidraw verfügbar?
+        lines.append(f"\n[2] hidraw: {'OK' if HAS_HIDRAW else 'FEHLEND'}")
+
+        # 3. USB-Bus nach Thermaltake Controllern durchsuchen
+        lines.append(f"\n[3] USB-Scan (VID={TT_VID:#06x}):")
         found_any = False
-        if HAS_HIDRAW:
-            try:
-                hidraw_devs = sorted([
-                    os.path.join("/dev", n)
-                    for n in os.listdir("/dev")
-                    if n.startswith("hidraw")
-                ])
-                for path in hidraw_devs:
-                    vid, pid = self._hidraw_get_info(path)
-                    if vid == TT_VID:
-                        name = TT_CONTROLLERS.get(pid, f"Unknown (PID {pid:#06x})")
-                        lines.append(f"    ✅ {path}: {name} (PID {pid:#06x})")
+        if HAS_USB:
+            for pid, name in TT_CONTROLLERS.items():
+                try:
+                    dev = usb.core.find(idVendor=TT_VID, idProduct=pid)
+                    if dev is not None:
                         found_any = True
-            except Exception as e:
-                lines.append(f"    hidraw scan error: {e}")
+                        lines.append(f"    ✅ PID {pid:#06x} ({name}) Bus={dev.bus} Addr={dev.address}")
+                        # Check kernel driver
+                        for cfg in dev:
+                            for intf in cfg:
+                                try:
+                                    active = dev.is_kernel_driver_active(intf.bInterfaceNumber)
+                                    lines.append(f"       Iface {intf.bInterfaceNumber}: "
+                                               f"{'kernel driver ACTIVE' if active else 'frei'}")
+                                except Exception:
+                                    pass
+                    else:
+                        lines.append(f"    — PID {pid:#06x} ({name})")
+                except Exception as e:
+                    lines.append(f"    ⚠ PID {pid:#06x} ({name}): {e}")
 
-        if not found_any:
-            lines.append("    — Keine gefunden (kein Device mit hidraw-Zugriff?)")
+            if not found_any:
+                lines.append("    — Keine gefunden")
+        else:
+            lines.append("    — pyusb nicht verfügbar, Scan übersprungen")
 
-        # 3. Alle /dev/hidraw* Geräte
-        lines.append("\n[3] Alle /dev/hidraw* Geräte:")
+        # 4. Alle /dev/hidraw* Geräte
+        lines.append("\n[4] Alle /dev/hidraw* Geräte:")
         try:
             hidraw_devs = sorted([
                 os.path.join("/dev", n)
@@ -337,8 +314,8 @@ class TTController:
         except Exception as e:
             lines.append(f"    Fehler: {e}")
 
-        # 4. Berechtigungen
-        lines.append("\n[4] Berechtigungen:")
+        # 5. Berechtigungen
+        lines.append("\n[5] Berechtigungen:")
         try:
             hidraw_devs = sorted([
                 os.path.join("/dev", n)
@@ -359,30 +336,35 @@ class TTController:
     # ── device plumbing ──
     def _find_device(self):
         """
-        Automatische Erkennung via hidraw (/dev/hidraw*).
-        Gibt (device_path, pid, name) oder (None, None, None) zurück.
+        Automatische Erkennung via pyusb (USB-Bus).
+        Gibt (device, pid, name) oder (None, None, None) zurück.
         """
-        if HAS_HIDRAW:
-            path, pid, name = self._find_hidraw_controller()
-            if path is not None:
-                tt_log("INFO", f"Found controller via hidraw: {name} (PID {pid:#06x}) at {path}")
-                return path, pid, name
+        if not HAS_USB:
+            tt_log("WARNING", "pyusb nicht verfügbar")
+            return None, None, None
 
-        tt_log("WARNING", "No Thermaltake controller found on hidraw")
+        for pid, name in TT_CONTROLLERS.items():
+            tt_log("DEBUG", f"Trying PID {pid:#06x} ({name}) ...")
+            try:
+                dev = usb.core.find(idVendor=TT_VID, idProduct=pid)
+            except Exception as e:
+                tt_log("DEBUG", f"  USB error: {e}")
+                continue
+            if dev is not None:
+                tt_log("INFO", f"Found controller: {name} (PID {pid:#06x}) "
+                        f"Bus={dev.bus} Addr={dev.address}")
+                return dev, pid, name
+
+        tt_log("WARNING", "No Thermaltake controller found on USB bus")
         return None, None, None
 
     def connect(self) -> bool:
-        if not HAS_HIDRAW:
-            tt_log("ERROR", "hidraw nicht verfügbar — USB disabled")
+        if not HAS_USB:
+            tt_log("ERROR", "pyusb nicht verfügbar — USB disabled")
             self.test_mode = True
             return False
 
-        # Automatisch alle bekannten Controller-PIDs durchprobieren
-        result = self._find_device()
-        self.dev = result[0]
-        detected_pid = result[1]
-        detected_name = result[2]
-
+        self.dev, detected_pid, detected_name = self._find_device()
         if self.dev is None:
             tt_log("ERROR", "Controller not found — entering test mode")
             self.test_mode = True
@@ -390,26 +372,53 @@ class TTController:
 
         self._detected_pid = detected_pid
         self._detected_name = detected_name
-        self._backend = "hidraw"
 
-        tt_log("INFO", f"Detected: {detected_name} (PID {detected_pid:#06x}, backend=hidraw)")
+        tt_log("INFO", f"Detected: {detected_name} (PID {detected_pid:#06x})")
 
-        return self._connect_hidraw()
+        # ── USB Device Setup ──
+        # 1) Detach kernel driver on ALL interfaces
+        for cfg in self.dev:
+            for intf in cfg:
+                try:
+                    if self.dev.is_kernel_driver_active(intf.bInterfaceNumber):
+                        tt_log("INFO", f"Detaching kernel driver from iface {intf.bInterfaceNumber}")
+                        self.dev.detach_kernel_driver(intf.bInterfaceNumber)
+                except (usb.core.USBError, NotImplementedError):
+                    pass
 
-    def _connect_hidraw(self) -> bool:
-        """Connect via hidraw device."""
+        # 2) Set configuration
         try:
-            self.dev = os.open(self.dev, os.O_RDWR | os.O_CLOEXEC)
-            self._hidraw_path = self._hidraw_path or f"fd={self.dev}"
-            tt_log("INFO", f"hidraw device opened: {self.dev}")
-        except OSError as e:
-            tt_log("ERROR", f"Cannot open hidraw device: {e}")
-            self.test_mode = True
-            return False
+            self.dev.set_configuration()
+            tt_log("INFO", "USB configuration set")
+        except usb.core.USBError as e:
+            tt_log("WARNING", f"set_configuration failed: {e}")
+            try:
+                self.dev.set_configuration(1)
+                tt_log("INFO", "USB configuration 1 set (fallback)")
+            except usb.core.USBError as e2:
+                tt_log("WARNING", f"set_configuration(1) also failed: {e2}")
+
+        # 3) Claim interface 0
+        self.cfg = self.dev.get_active_configuration()
+        self.iface = self.cfg[(0, 0)]
+        try:
+            usb.util.claim_interface(self.dev, self.iface)
+            tt_log("INFO", f"USB interface claimed (iface={self.iface.bInterfaceNumber})")
+        except usb.core.USBError as e:
+            tt_log("WARNING", f"claim_interface failed: {e}")
+
+        # 4) Log device info
+        try:
+            tt_log("DEBUG", f"Device: bus={self.dev.bus} addr={self.dev.address}")
+            for ep in self.iface:
+                tt_log("DEBUG", f"  EP: 0x{ep.bEndpointAddress:02x} "
+                        f"type={ep.bmAttributes} maxpacket={ep.wMaxPacketSize}")
+        except Exception as e:
+            tt_log("DEBUG", f"Device info error: {e}")
 
         self.ready = True
         self._init_controller()
-        tt_log("INFO", "Controller connected and initialized (hidraw)")
+        tt_log("INFO", "Controller connected and initialized")
         return True
 
     def _init_controller(self):
@@ -417,17 +426,12 @@ class TTController:
         if self.test_mode:
             return
         tt_log("INFO", "Initializing controller (init1 + init2) ...")
-        # init step 1
         self._send_raw(b'\x28\x01' + b'\x00' * 62)
-        # init step 2
         self._send_raw(b'\x29\x02' + b'\x00' * 62)
         time.sleep(0.3)
         try:
-            resp = self._hidraw_read(65, timeout=1000)
-            # Strip report ID byte (first byte)
-            if len(resp) == 65:
-                resp = resp[1:]
-            tt_log("DEBUG", f"Init response: {len(resp)} bytes — {resp[:32].hex()}")
+            resp = self.dev.read(0x81, 64, timeout=1000)
+            tt_log("DEBUG", f"Init response: {len(resp)} bytes — {bytes(resp)[:32].hex()}")
             if len(resp) >= 33:
                 self._fan_count = [min(max(resp[16 + i], 1), 5) for i in range(MAX_CHANNELS)]
                 tt_log("INFO", f"Fan counts per channel: {self._fan_count}")
@@ -441,33 +445,21 @@ class TTController:
         if self.test_mode or self.dev is None:
             return
         try:
-            # HID report: 1 byte report ID (0x00) + 64 bytes data = 65 bytes total
-            hid_report = b'\x00' + raw
-            written = os.write(self.dev, hid_report)
-            tt_log("DEBUG", f"hidraw write: {written}/65 bytes")
+            written = self.dev.write(0x02, raw, timeout=1000)
+            tt_log("DEBUG", f"USB write: {written}/64 bytes")
         except Exception as e:
-            tt_log("ERROR", f"hidraw write failed: {e}")
+            tt_log("ERROR", f"USB write failed: {e}")
 
     def _read_resp(self, timeout=1000) -> bytes:
         if self.test_mode or self.dev is None:
             return b''
         try:
-            return self._hidraw_read(65, timeout=timeout)
+            resp = self.dev.read(0x81, 64, timeout=timeout)
+            tt_log("DEBUG", f"USB read: {len(resp)} bytes")
+            return bytes(resp)
         except Exception as e:
-            tt_log("WARNING", f"hidraw read failed: {e}")
+            tt_log("WARNING", f"USB read failed: {e}")
             return b''
-
-    def _hidraw_read(self, size: int, timeout: int = 1000) -> bytes:
-        """Read from hidraw device with timeout (ms)."""
-        import select
-        fd = self.dev
-        ready, _, _ = select.select([fd], [], [], timeout / 1000.0)
-        if not ready:
-            return b''
-        data = os.read(fd, size)
-        tt_log("DEBUG", f"hidraw read: {len(data)} bytes")
-        # Strip report ID (first byte) and return 64 bytes
-        if len(data) == 65:
             return data[1:]
         return bytes(data)
 
@@ -522,7 +514,8 @@ class TTController:
         if self.test_mode or self.dev is None:
             return
         try:
-            os.close(self.dev)
+            usb.util.release_interface(self.dev, self.iface)
+            self.dev.attach_kernel_driver(0)
         except Exception:
             pass
 
@@ -1126,8 +1119,8 @@ def _print_startup_diag(msg: str):
 
 def _system_check():
     """Lightweight pre-startup check — logs problems before the GUI loads."""
-    if not HAS_HIDRAW:
-        tt_log("ERROR", "hidraw nicht verfügbar — ctypes/fcntl fehlt")
+    if not HAS_USB:
+        tt_log("ERROR", "pyusb nicht verfügbar — pip3 install pyusb")
 
     # PyQt5 / X11
     if not HAS_QT:
@@ -1163,7 +1156,6 @@ if __name__ == "__main__":
         _ctl.dev = None
         _ctl.ready = False
         _ctl.test_mode = True
-        _ctl._backend = None
         _ctl._fan_count = [1] * MAX_CHANNELS
         _ctl._detected_pid = None
         _ctl._detected_name = None
