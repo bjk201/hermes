@@ -188,10 +188,7 @@ def _checksum(data: bytes) -> int:
 
 
 def build_packet(cmd: int, channel: int, payload: bytes) -> bytes:
-    """
-    Build a 64-byte Thermaltake USB packet.
-    Layout: [0x33] [CMD] [CH] [LEN] [DATA...] [CHK] [padding 0x00 to 64]
-    """
+    """Legacy packet builder - kept for compatibility but not used for TT protocol."""
     header = bytes([0x33, cmd, channel & 0x0F, len(payload)])
     packet = header + payload
     chk    = _checksum(packet)
@@ -201,12 +198,20 @@ def build_packet(cmd: int, channel: int, payload: bytes) -> bytes:
 
 
 # ─────────────────────────────────────────────
-#  TT Controller (USB backend)
+#  TT Controller (USB backend via hidapi)
 # ─────────────────────────────────────────────
 class TTController:
     """
     Low-level USB communication with the Thermaltake Riing Plus controller.
-    Uses hidapi library for HID SET_REPORT/GET_REPORT via /dev/hidraw*.
+    Uses hidapi library. Protocol based on OpenRGB ThermaltakeRiingController.
+
+    Packet format (65 bytes total, sent via hid_write):
+      Byte 0:    Report ID (0x00)
+      Byte 1:    Command (0x32=RGB, 0x33=Firmware/Mode, 0xFE=Init)
+      Byte 2:    Sub-command (0x52=RGB data, 0x50=Firmware, 0x33=Init)
+      Byte 3:    Port (1-indexed)
+      Byte 4:    Mode + Speed
+      Byte 5-40: GRB color data (12 LEDs * 3 bytes)
     """
 
     def __init__(self, test_mode=False):
@@ -216,6 +221,8 @@ class TTController:
         self._fan_count = [1] * MAX_CHANNELS
         self._detected_pid = None
         self._detected_name = None
+        self._current_mode = [0] * MAX_CHANNELS
+        self._current_speed = [2] * MAX_CHANNELS  # NORMAL speed default
 
         if not test_mode:
             self.connect()
@@ -334,31 +341,30 @@ class TTController:
         return True
 
     def _init_controller(self):
-        """Send initialisation byte-stream to detect fan count per channel."""
+        """Send initialization packet (OpenRGB format)."""
         if self.test_mode:
             return
-        tt_log("INFO", "Initializing controller (init1 + init2) ...")
-        self._send_raw(b'\x28\x01' + b'\x00' * 62)
-        self._send_raw(b'\x29\x02' + b'\x00' * 62)
+        tt_log("INFO", "Initializing controller ...")
+        # Init packet: ReportID=0x00, Cmd=0xFE, Sub=0x33
+        buf = bytearray(65)
+        buf[0] = 0x00  # Report ID
+        buf[1] = 0xFE  # Init command
+        buf[2] = 0x33  # Sub-command
+        self._send_raw(bytes(buf))
         time.sleep(0.3)
         try:
-            resp = self.dev.read(64, timeout=1000)
+            resp = self.dev.read(65, timeout=1000)
             tt_log("DEBUG", f"Init response: {len(resp)} bytes — {bytes(resp)[:32].hex()}")
-            if len(resp) >= 33:
-                self._fan_count = [min(max(resp[16 + i], 1), 5) for i in range(MAX_CHANNELS)]
-                tt_log("INFO", f"Fan counts per channel: {self._fan_count}")
-            else:
-                tt_log("WARNING", "Init response too short — using defaults")
         except Exception as e:
-            tt_log("WARNING", f"Init read failed: {e} — using defaults")
+            tt_log("DEBUG", f"Init read: {e}")
 
     def _send_raw(self, data: bytes):
-        raw = data[:64].ljust(64, b'\x00')
+        """Send raw 65-byte packet via hidapi (Report ID + 64 bytes)."""
         if self.test_mode or self.dev is None:
             return
         try:
-            # hidapi send_feature_report: report_id + data
-            # The Thermaltake controller expects 64-byte reports
+            # Pad to 64 bytes (hidapi prepends Report ID 0x00 automatically)
+            raw = data[:64].ljust(64, b'\x00')
             self.dev.write(raw)
             tt_log("DEBUG", f"hidapi write: {len(raw)} bytes")
         except Exception as e:
@@ -368,51 +374,63 @@ class TTController:
         if self.test_mode or self.dev is None:
             return b''
         try:
-            resp = self.dev.read(64, timeout=timeout)
+            resp = self.dev.read(65, timeout=timeout)
             tt_log("DEBUG", f"hidapi read: {len(resp)} bytes")
             return bytes(resp)
         except Exception as e:
             tt_log("WARNING", f"hidapi read failed: {e}")
             return b''
 
-    # ── public API ──
+    # ── public API (OpenRGB protocol) ──
     @property
     def num_fans(self) -> list:
         return self._fan_count
 
     def set_color(self, channel: int, colors: list):
         """
-        Set per-LED colors on one channel.
+        Set per-LED colors on one channel using OpenRGB protocol.
         `colors` is a list of (R, G, B) tuples, length <= LEDS_PER_FAN.
-        The controller expects packed BGR per LED.
+        Controller expects GRB format, ports are 1-indexed.
         """
-        payload = bytearray()
-        for r, g, b in colors[:LEDS_PER_FAN]:
-            payload += bytes([b, g, r])
-        while len(payload) < LEDS_PER_FAN * 3:
-            payload += b'\x00'
-        pkt = build_packet(CMD_SETCOLOR, channel, bytes(payload))
+        self._current_mode[channel] = 0x00  # Static mode
+        # Build GRB color data (12 LEDs * 3 bytes)
+        color_data = bytearray(LEDS_PER_FAN * 3)
+        for i, (r, g, b) in enumerate(colors[:LEDS_PER_FAN]):
+            idx = i * 3
+            color_data[idx + 0] = g  # G first (GRB order)
+            color_data[idx + 1] = r
+            color_data[idx + 2] = b
+
+        self._send_rgb_packet(channel + 1, 0x00, self._current_speed[channel], LEDS_PER_FAN, bytes(color_data))
         tt_log("INFO", f"set_color ch={channel} first_color=({colors[0] if colors else '?'})")
-        self._send_raw(pkt)
 
     def set_speed(self, channel: int, percent: int):
-        """Set PWM fan speed for one channel (0-100 %)."""
+        """Set PWM fan speed for one channel (0-100%)."""
         val = max(0, min(100, percent))
-        pkt = build_packet(CMD_SETSPEED, channel, bytes([val]))
+        # Speed packet: ReportID=0x00, Cmd=0x33, Sub=0x56, Port, Speed
+        buf = bytearray(65)
+        buf[0] = 0x00  # Report ID
+        buf[1] = 0x33  # Command
+        buf[2] = 0x56  # Speed sub-command
+        buf[3] = channel + 1  # Port (1-indexed)
+        buf[4] = int(val * 255 / 100)  # PWM value (0-255)
+        self._send_raw(bytes(buf))
         tt_log("INFO", f"set_speed ch={channel} percent={val}%")
-        self._send_raw(pkt)
 
-    def set_mode(self, channel: int, mode: int, speed: int = 0x01, direction: int = 0x00):
+    def set_mode(self, channel: int, mode: int, speed: int = 2, direction: int = 0):
         """Set lighting effect mode for a channel."""
-        pkt = build_packet(CMD_SETMODE, channel, bytes([mode, speed, direction]))
+        self._current_mode[channel] = mode
+        self._current_speed[channel] = speed & 0x03
+        # Re-send color data with new mode
+        black = [(0, 0, 0)] * LEDS_PER_FAN
+        self.set_color(channel, black)
         mode_name = RGB_EFFECTS.get(mode, f"0x{mode:02x}")
-        tt_log("INFO", f"set_mode ch={channel} mode={mode_name} speed={speed} dir={direction}")
-        self._send_raw(pkt)
+        tt_log("INFO", f"set_mode ch={channel} mode={mode_name} speed={speed}")
 
     def apply(self):
         """Push pending config to the controller."""
         tt_log("INFO", "apply() — pushing config to controller")
-        self._send_raw(build_packet(CMD_APPLY, 0x00, b''))
+        # No separate apply needed in OpenRGB protocol - each command is immediate
 
     def all_off(self):
         """Turn off all LEDs and stop all fans."""
@@ -420,7 +438,26 @@ class TTController:
             self.set_speed(ch, 0)
             black = [(0, 0, 0)] * LEDS_PER_FAN
             self.set_color(ch, black)
-        self.apply()
+
+    def _send_rgb_packet(self, port: int, mode: int, speed: int, num_colors: int, color_data: bytes):
+        """
+        Send RGB color packet in OpenRGB format:
+        Byte 0:  Report ID (0x00)
+        Byte 1:  0x32 (RGB command)
+        Byte 2:  0x52 (RGB data sub-command)
+        Byte 3:  Port (1-indexed)
+        Byte 4:  Mode + Speed
+        Byte 5+: GRB color data
+        """
+        buf = bytearray(65)
+        buf[0] = 0x00  # Report ID
+        buf[1] = 0x32  # RGB command
+        buf[2] = 0x52  # RGB data sub-command
+        buf[3] = port   # Port (1-indexed)
+        buf[4] = mode + (speed & 0x03)  # Mode + speed combined
+        # Copy GRB color data
+        buf[5:5 + len(color_data)] = color_data[:LEDS_PER_FAN * 3]
+        self._send_raw(bytes(buf))
 
     def close(self):
         if self.test_mode or self.dev is None:
