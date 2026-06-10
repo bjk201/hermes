@@ -25,56 +25,46 @@ import os
 import struct
 import time
 import math
-import select
-import glob as glob_mod
 import threading
 import logging
 import queue
-import re
 from functools import partial
 
-# ─────────────────────────────────────────────
-#  hidraw backend (Linux-only, no pyusb needed)
-# ─────────────────────────────────────────────
+try:
+    import usb.core
+    import usb.util
+    # Test ob es wirklich funktioniert (manchmal importiert aber keine Backend)
+    try:
+        usb.core.find()
+        HAS_USB = True
+    except usb.core.NoBackendError:
+        HAS_USB = False
+        _logger = logging.getLogger("tt-riing-plus")
+        _logger.warning("pyusb importiert aber kein Backend — USB deaktiviert")
+    except Exception:
+        HAS_USB = True  # Backend da, nur kein Gerät
+except ImportError:
+    HAS_USB = False
 
-def _find_hidraw_devices(vid=0x264a):
-    """Find all /dev/hidraw* devices matching the given VID (and optional PID).
-    Returns list of (device_path, vid, pid) tuples.
-    """
-    results = []
-    for path in sorted(glob_mod.glob("/dev/hidraw*")):
-        try:
-            # Read VID/PID from udev symlink
-            real = os.path.realpath(path)  # e.g. /sys/devices/pci.../usb1/1-1/1-1:1.0/0003:264A:1FA5.0001/hidraw/hidraw0
-            # Walk up to find modalias
-            sysfs_base = real.replace("/hidraw/" + os.path.basename(path), "")
-            modalias_path = os.path.join(sysfs_base, "..", "modalias")
-            if not os.path.exists(modalias_path):
-                modalias_path = os.path.join(sysfs_base, "modalias")
-            if os.path.exists(modalias_path):
-                with open(modalias_path) as f:
-                    alias = f.read().strip()
-                # usb:v264Ap1FA5d...
-                if f"v{vid:04X}p" in alias.lower():
-                    pid_hex = alias.split("p")[1][:4] if "p" in alias else "0000"
-                    try:
-                        pid = int(pid_hex, 16)
-                    except ValueError:
-                        pid = 0
-                    results.append((path, vid, pid))
-            else:
-                # Fallback: try reading /dev/hidrawX directly and probing
-                pass
-        except Exception:
-            pass
-    return results
-
-
-HAS_HIDRAW = os.path.exists("/dev") and bool(glob_mod.glob("/dev/hidraw*"))
-
-if not HAS_HIDRAW:
-    _logger = logging.getLogger("tt-riing-plus")
-    _logger.warning("No /dev/hidraw* devices found — USB-HID not available")
+# hidraw support — preferred over pyusb for Thermaltake controllers
+# The Linux kernel exposes these as /dev/hidraw* (HID class), not raw USB
+HAS_HIDRAW = False
+try:
+    import fcntl
+    import ctypes
+    import ctypes.util
+    # HIDIOCGRAWINFO = _IOR('H', 0x03, struct hidraw_devinfo)
+    # struct hidraw_devinfo { s32 bustype; s16 vendor; s16 product; }
+    class HidrawDevinfo(ctypes.Structure):
+        _fields_ = [
+            ("bustype", ctypes.c_int32),
+            ("vendor",  ctypes.c_int16),
+            ("product", ctypes.c_int16),
+        ]
+    _HIDIOCGRAWINFO = 0x80084803  # _IOC(_IOC_READ, 'H', 0x03, 8)
+    HAS_HIDRAW = True
+except Exception:
+    pass
 
 try:
     from PyQt5.QtWidgets import (
@@ -101,7 +91,7 @@ def _safe_logging_setup():
     ch.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
     logger.addHandler(ch)
 
-    log_path = None
+    # File handler — may fail if ~/.config is missing / unwritable / disk full
     try:
         log_dir = os.path.join(os.path.expanduser("~"), ".config", "tt-riing-plus")
         os.makedirs(log_dir, exist_ok=True)
@@ -117,13 +107,13 @@ def _safe_logging_setup():
     except Exception as e:
         logger.warning("File logging disabled: %s", e)
 
-    return logger, log_path
+    return logger, log_path if 'log_path' in dir() else None
 
 
 _logger, LOG_FILE = _safe_logging_setup()
 _logger.info("TT Riing Plus Control started")
 _logger.info("Python %s | Platform: %s", sys.version.split()[0], sys.platform)
-_logger.info("usb=%s | qt=%s", HAS_HIDRAW, HAS_QT)
+_logger.info("usb=%s | hidraw=%s | qt=%s", HAS_USB, HAS_HIDRAW, HAS_QT)
 
 # Thread-safe log queue — GUI polls this instead of callback from foreign threads
 _log_queue = queue.Queue()
@@ -175,25 +165,34 @@ FAN_SPEED_PRESETS = {
 }
 
 # ─────────────────────────────────────────────
-#  RGB Effects — Werte basierend auf OpenRGB ThermaltakeRiingController.h
-# FLOW=0, SPECTRUM=4, RIPPLE=8, BLINK=C, PULSE=10, WAVE=14, PER_LED=18, FULL=19
+#  RGB Effects
 # ─────────────────────────────────────────────
 RGB_EFFECTS = {
-    0x00: "Flow",
-    0x04: "Spectrum",
-    0x08: "Ripple",
-    0x0c: "Blink",
-    0x10: "Pulse",
-    0x14: "Wave",
-    0x18: "Per-LED",
-    0x19: "Full",
+    0x00: "Static",
+    0x01: "Breathing",
+    0x02: "Wave",
+    0x03: "Ripple",
+    0x04: "Pulse",
+    0x05: "Spectrum Cycle",
+    0x06: "Rainbow Wave",
+    0x07: "Reactive",
 }
 
+# Effect modes for CMD_SETMODE byte values
+# Per-TT-docs: byte[5]=mode, byte[6]=direction, byte[7]=speed
+MODE_STATIC   = 0x00
+MODE_BREATH   = 0x01
+MODE_WAVE     = 0x02
+MODE_RIPPLE   = 0x03
+MODE_PULSE    = 0x04
+MODE_SPECTRUM = 0x05
+MODE_RAINBOW  = 0x06
+MODE_REACTIVE = 0x07
+
 EFFECT_SPEED_MAP = {
-    "Extreme": 0x00,
-    "Fast":  0x01,
-    "Normal":  0x02,
-    "Slow":    0x03,
+    "Slow":     0x00,
+    "Normal":   0x01,
+    "Fast":     0x02,
 }
 
 # ─────────────────────────────────────────────
@@ -222,265 +221,396 @@ def build_packet(cmd: int, channel: int, payload: bytes) -> bytes:
 # ─────────────────────────────────────────────
 class TTController:
     """
-    HID-based communication with Thermaltake Riing Plus / Quad / Trio controllers.
-
-    Uses Linux /dev/hidraw* (no pyusb needed). Protocol from OpenRGB:
-      Init:  [0x00][0xFE][0x33]
-      RGB:   [0x00][0x32][0x52][port][mode|speed][GRB LED data...]
-      Fan:   [0x00][0x32][0x51][port][percent]  (assumed, not confirmed)
-    Packet size: 65 bytes (1 report ID + 64 data).
+    Low-level USB communication with the Thermaltake Riing Plus controller.
+    Manages device discovery, initialisation, and command dispatch.
     """
 
     def __init__(self, test_mode=False):
-        self.fd = None            # file descriptor from os.open()
-        self.dev_path = None      # e.g. "/dev/hidraw0"
+        self.dev = None      # hidraw: file descriptor (int); pyusb: usb device
+        self.cfg = None
+        self.iface = None
         self.ready = False
         self.test_mode = test_mode
+        self._backend = None  # 'hidraw' or 'pyusb'
+        self._hidraw_path = None
         self._fan_count = [1] * MAX_CHANNELS
         self._detected_pid = None
         self._detected_name = None
-        self._current_mode = 0x00  # Default: FLOW mode
 
         if not test_mode:
             self.connect()
 
     # ── hidraw helpers ──
+    @staticmethod
+    def _hidraw_get_info(path: str):
+        """Get (VID, PID) from a hidraw device via ioctl HIDIOCGRAWINFO."""
+        if not HAS_HIDRAW:
+            return None, None
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_CLOEXEC)
+            info = HidrawDevinfo()
+            fcntl.ioctl(fd, _HIDIOCGRAWINFO, info)
+            os.close(fd)
+            return info.vendor, info.product
+        except Exception:
+            return None, None
 
     @staticmethod
-    def _find_hid_devices():
-        """Scan /dev/hidraw* for Thermaltake controllers.
-        Returns list of (dev_path, pid, name).
+    def _find_hidraw_controller():
         """
-        found = []
-        for path in sorted(glob_mod.glob("/dev/hidraw*")):
-            try:
-                # Resolve sysfs path to get modalias with VID/PID
-                real = os.path.realpath(path)
-                Device_dir = os.path.dirname(real)
-                # Walk up to find device's modalias
-                for candidate in [
-                    os.path.join(device_dir, "modalias"),
-                    os.path.join(device_dir, "..", "modalias"),
-                    os.path.join(device_dir, "..", "..", "modalias"),
-                ]:
-                    if os.path.exists(candidate):
-                        with open(candidate) as f:
-                            alias = f.read().strip()
-                        m = re.search(r"usb:v([0-9A-Fa-f]{4})p([0-9A-Fa-z]{4})", alias)
-                        if m:
-                            vid = int(m.group(1), 16)
-                            pid = int(m.group(2), 16)
-                            if vid == TT_VID:
-                                name = TT_CONTROLLERS.get(pid, f"Unknown (PID {pid:#06x})")
-                                found.append((path, pid, name))
-                                break
-            except Exception:
-                continue
-        return found
-
-    def _open_device(self, dev_path):
-        """Open hidraw device, return fd or None."""
+        Scan /dev/hidraw* for a Thermaltake controller.
+        Returns (path, pid, name) or (None, None, None).
+        """
+        if not HAS_HIDRAW:
+            return None, None, None
         try:
-            fd = os.open(dev_path, os.O_RDWR | os.O_NONBLOCK)
-            tt_log("INFO", f"Opened {dev_path}")
-            return fd
-        except PermissionError:
-            tt_log("ERROR", f"Permission denied: {dev_path} — need udev rule or root")
-            return None
-        except OSError as e:
-            tt_log("ERROR", f"Cannot open {dev_path}: {e}")
-            return None
+            hidraw_devs = sorted([
+                os.path.join("/dev", n)
+                for n in os.listdir("/dev")
+                if n.startswith("hidraw")
+            ])
+        except Exception:
+            return None, None, None
 
-    def _send_report(self, report_id, data):
-        """Send a 64-byte HID report. Returns bytes written or -1."""
-        if self.test_mode or self.fd is None:
-            return 0
-        # Linux hidraw: write report_id + data (total 65 bytes)
-        buf = bytes([report_id]) + bytes(data[:63]).ljust(64, b'\x00')
-        try:
-            written = os.write(self.fd, buf)
-            tt_log("DEBUG", f"HID write: {written}/65 bytes")
-            return written
-        except OSError as e:
-            tt_log("ERROR", f"HID write failed: {e}")
-            return -1
+        for path in hidraw_devs:
+            vid, pid = TTController._hidraw_get_info(path)
+            if vid == TT_VID and pid in TT_CONTROLLERS:
+                return path, pid, TT_CONTROLLERS[pid]
 
-    def _read_report(self, timeout_ms=500):
-        """Read a 64-byte HID report. Returns bytes or []."""
-        if self.test_mode or self.fd is None:
-            return []
-        # Use select for timeout
-        try:
-            r, _, _ = select.select([self.fd], [], [], timeout_ms / 1000.0)
-            if r:
-                data = os.read(self.fd, 65)
-                tt_log("DEBUG", f"HID read: {len(data)} bytes")
-                return data
-        except OSError as e:
-            tt_log("WARNING", f"HID read failed: {e}")
-        return []
+        # Second pass: any device with matching VID (even unknown PID)
+        for path in hidraw_devs:
+            vid, pid = TTController._hidraw_get_info(path)
+            if vid == TT_VID:
+                return path, pid, f"Unknown TT (PID {pid:#06x})"
+
+        return None, None, None
 
     # ── USB Diagnostic ──
-
     def diagnose(self) -> str:
+        """
+        Umfassende USB/HID-Diagnose — prüft hidraw, pyusb, udev, Berechtigungen,
+        und listet alle Geräte auf.
+        """
         lines = []
         lines.append("=" * 50)
         lines.append("  USB DIAGNOSE (HID)")
         lines.append("=" * 50)
 
-        # 1. hidraw devices available?
+        # 1. hidraw verfügbar?
         lines.append(f"\n[1] hidraw: {'OK' if HAS_HIDRAW else 'FEHLEND'}")
         if not HAS_HIDRAW:
-            lines.append("    → No /dev/hidraw* devices, check permissions")
-            return "\n".join(lines)
+            lines.append("    → ctypes/fcntl nicht verfügbar")
 
-        # 2. Find Thermaltake controllers
-        lines.append(f"\n[2] Suche nach bekannten Controllers (VID={TT_VID:#06x}):")
-        found_devs = self._find_hid_devices()
-        if not found_devs:
-            lines.append("    — Keine gefunden (kein Device mit hidraw-Zugriff?)")
-        else:
-            for dev_path, pid, name in found_devs:
-                lines.append(f"    ✅ {name} (PID {pid:#06x}) → {dev_path}")
+        # 2. pyusb verfügbar?
+        lines.append(f"\n[2] pyusb: {'OK' if HAS_USB else 'FEHLEND'}")
+        if not HAS_USB:
+            lines.append("    → pip3 install pyusb")
 
-        # 3. All hidraw devices
-        lines.append("\n[3] Alle /dev/hidraw* Geräte:")
-        for path in sorted(glob_mod.glob("/dev/hidraw*")):
+        # 3. Suche nach bekannten Controllers via hidraw
+        lines.append(f"\n[3] Suche nach bekannten Controllers (VID={TT_VID:#06x}):")
+        found_any = False
+
+        # hidraw scan
+        if HAS_HIDRAW:
             try:
-                real = os.path.realpath(path)
-                device_dir = os.path.dirname(real)
-                modalias_str = "?"
-                for candidate in [
-                    os.path.join(device_dir, "modalias"),
-                    os.path.join(device_dir, "..", "modalias"),
-                    os.path.join(device_dir, "..", "..", "modalias"),
-                ]:
-                    if os.path.exists(candidate):
-                        with open(candidate) as f:
-                            modalias_str = f.read().strip()
-                        break
-                lines.append(f"    {path}: {modalias_str}")
+                hidraw_devs = sorted([
+                    os.path.join("/dev", n)
+                    for n in os.listdir("/dev")
+                    if n.startswith("hidraw")
+                ])
+                for path in hidraw_devs:
+                    vid, pid = self._hidraw_get_info(path)
+                    if vid == TT_VID:
+                        name = TT_CONTROLLERS.get(pid, f"Unknown (PID {pid:#06x})")
+                        lines.append(f"    ✅ {path}: {name} (PID {pid:#06x})")
+                        found_any = True
             except Exception as e:
-                lines.append(f"    {path}: Fehler — {e}")
+                lines.append(f"    hidraw scan error: {e}")
 
-        # 4. Permissions
-        lines.append("\n[4] Berechtigungen:")
-        for path in sorted(glob_mod.glob("/dev/hidraw*")):
-            try:
-                mode = os.stat(path).st_mode
-                r = bool(mode & 0o444)
-                lines.append(f"    {path}: {'lesbar' if r else 'NICHT LESBAR'}")
-            except Exception:
-                pass
+        # pyusb scan (fallback)
+        if HAS_USB and not found_any:
+            for pid, name in TT_CONTROLLERS.items():
+                try:
+                    dev = usb.core.find(idVendor=TT_VID, idProduct=pid)
+                except usb.core.USBError as e:
+                    lines.append(f"    PID {pid:#06x} ({name}): USB-Fehler: {e}")
+                    continue
+                status = "✅ GEFUNDEN" if dev else "—"
+                lines.append(f"    PID {pid:#06x} ({name}): {status}")
+                if dev is not None:
+                    found_any = True
+
+        if not found_any:
+            lines.append("    — Keine gefunden (kein Device mit hidraw-Zugriff?)")
+
+        # 4. Alle /dev/hidraw* Geräte
+        lines.append("\n[4] Alle /dev/hidraw* Geräte:")
+        try:
+            hidraw_devs = sorted([
+                os.path.join("/dev", n)
+                for n in os.listdir("/dev")
+                if n.startswith("hidraw")
+            ])
+            for path in hidraw_devs:
+                vid, pid = (None, None)
+                if HAS_HIDRAW:
+                    vid, pid = self._hidraw_get_info(path)
+                if vid is not None:
+                    lines.append(f"    {path}: VID={vid:#06x} PID={pid:#06x}")
+                else:
+                    lines.append(f"    {path}: ?")
+        except Exception as e:
+            lines.append(f"    Fehler: {e}")
+
+        # 5. Berechtigungen
+        lines.append("\n[5] Berechtigungen:")
+        try:
+            hidraw_devs = sorted([
+                os.path.join("/dev", n)
+                for n in os.listdir("/dev")
+                if n.startswith("hidraw")
+            ])
+            for path in hidraw_devs:
+                readable = os.access(path, os.R_OK)
+                writable = os.access(path, os.W_OK)
+                lines.append(f"    {path}: {'lesbar' if readable else 'NICHT lesbar'} / "
+                           f"{'schreibbar' if writable else 'NICHT schreibbar'}")
+        except Exception as e:
+            lines.append(f"    Fehler: {e}")
 
         lines.append("\n" + "=" * 50)
         return "\n".join(lines)
 
-    # ── connection ──
+    # ── device plumbing ──
+    def _find_device(self):
+        """
+        Automatische Erkennung: zuerst hidraw (vororiert), dann pyusb Fallback.
+        Gibt (device, pid, name, backend) oder (None, None, None, None) zurück.
+        Logs each attempt.
+        """
+        # 1) Try hidraw first (Thermaltake controllers are HID class devices)
+        if HAS_HIDRAW:
+            path, pid, name = self._find_hidraw_controller()
+            if path is not None:
+                tt_log("INFO", f"Found controller via hidraw: {name} (PID {pid:#06x}) at {path}")
+                return path, pid, name, "hidraw"
+
+        # 2) Fallback: pyusb
+        if HAS_USB:
+            for pid, name in TT_CONTROLLERS.items():
+                tt_log("DEBUG", f"Trying PID {pid:#06x} ({name}) via pyusb ...")
+                try:
+                    dev = usb.core.find(idVendor=TT_VID, idProduct=pid)
+                except usb.core.USBError as e:
+                    tt_log("DEBUG", f"  USB error: {e}")
+                    continue
+                if dev is not None:
+                    tt_log("INFO", f"Found controller via pyusb: {name} (PID {pid:#06x}) "
+                            f"Bus={dev.bus} Addr={dev.address}")
+                    return dev, pid, name, "pyusb"
+
+        tt_log("WARNING", "No known Thermaltake controller found on hidraw or USB bus")
+        return None, None, None, None
 
     def connect(self) -> bool:
-        if not HAS_HIDRAW:
-            tt_log("ERROR", "hidraw not available — entering test mode")
+        if not HAS_HIDRAW and not HAS_USB:
+            tt_log("ERROR", "Neither hidraw nor pyusb available — USB disabled")
             self.test_mode = True
             return False
 
-        devices = self._find_hid_devices()
-        if not devices:
-            tt_log("ERROR", "No Thermaltake controller found on hidraw — test mode")
+        # Automatisch alle bekannten Controller-PIDs durchprobieren
+        self.dev, detected_pid, detected_name, self._backend = self._find_device()
+        if self.dev is None:
+            tt_log("ERROR", "Controller not found — entering test mode")
             self.test_mode = True
             return False
 
-        # Pick first device
-        dev_path, pid, name = devices[0]
-        self.dev_path = dev_path
-        self._detected_pid = pid
-        self._detected_name = name
+        # Für Kompatibilität: aktuelle PID merken
+        self._detected_pid = detected_pid
+        self._detected_name = detected_name
 
-        tt_log("INFO", f"Detected: {name} (PID {pid:#06x}) on {dev_path}")
+        tt_log("INFO", f"Detected: {detected_name} (PID {detected_pid:#06x}, backend={self._backend})")
 
-        self.fd = self._open_device(dev_path)
-        if self.fd is None:
-            tt_log("ERROR", f"Cannot open {dev_path} — test mode")
+        if self._backend == "hidraw":
+            return self._connect_hidraw()
+        else:
+            return self._connect_pyusb()
+
+    def _connect_hidraw(self) -> bool:
+        """Connect via hidraw device."""
+        try:
+            self.dev = os.open(self.dev, os.O_RDWR | os.O_CLOEXEC)
+            self._hidraw_path = self._hidraw_path or f"fd={self.dev}"
+            tt_log("INFO", f"hidraw device opened: {self.dev}")
+        except OSError as e:
+            tt_log("ERROR", f"Cannot open hidraw device: {e}")
             self.test_mode = True
             return False
 
         self.ready = True
         self._init_controller()
-        tt_log("INFO", "Controller connected and initialized")
+        tt_log("INFO", "Controller connected and initialized (hidraw)")
+        return True
+
+    def _connect_pyusb(self) -> bool:
+        """Connect via pyusb (fallback)."""
+        # 1) Detach kernel driver on ALL interfaces
+        for cfg in self.dev:
+            for intf in cfg:
+                try:
+                    if self.dev.is_kernel_driver_active(intf.bInterfaceNumber):
+                        tt_log("INFO", f"Detaching kernel driver from iface {intf.bInterfaceNumber}")
+                        self.dev.detach_kernel_driver(intf.bInterfaceNumber)
+                except (usb.core.USBError, NotImplementedError):
+                    pass
+
+        # 2) Set configuration (try all available)
+        try:
+            self.dev.set_configuration()
+            tt_log("INFO", "USB configuration set")
+        except usb.core.USBError as e:
+            tt_log("WARNING", f"set_configuration failed: {e}")
+            try:
+                self.dev.set_configuration(1)
+                tt_log("INFO", "USB configuration 1 set (fallback)")
+            except usb.core.USBError as e2:
+                tt_log("WARNING", f"set_configuration(1) also failed: {e2}")
+
+        # 3) Claim interface 0
+        self.cfg = self.dev.get_active_configuration()
+        self.iface = self.cfg[(0, 0)]
+        try:
+            usb.util.claim_interface(self.dev, self.iface)
+            tt_log("INFO", f"USB interface claimed (iface={self.iface.bInterfaceNumber})")
+        except usb.core.USBError as e:
+            tt_log("WARNING", f"claim_interface failed: {e}")
+
+        # 4) Log device info for debugging
+        try:
+            tt_log("DEBUG", f"Device: bus={self.dev.bus} addr={self.dev.address}")
+            tt_log("DEBUG", f"Config: {self.cfg.bConfigurationValue} "
+                    f"iface={self.iface.bInterfaceNumber} "
+                    f"alt={self.iface.bAlternateSetting}")
+            for ep in self.iface:
+                tt_log("DEBUG", f"  EP: 0x{ep.bEndpointAddress:02x} "
+                        f"type={ep.bmAttributes} "
+                        f"maxpacket={ep.wMaxPacketSize}")
+        except Exception as e:
+            tt_log("DEBUG", f"Device info error: {e}")
+
+        self.ready = True
+        self._init_controller()
+        tt_log("INFO", "Controller connected and initialized (pyusb)")
         return True
 
     def _init_controller(self):
-        """Send init packet to wake up the controller.
-
-        OpenRGB protocol: [0x00][0xFE][0x33] (report ID 0x00, then 2 bytes)
-        Total report: 65 bytes = 0x00 + 0xFE + 0x33 + 62 zeros
-        """
+        """Send initialisation byte-stream to detect fan count per channel."""
         if self.test_mode:
             return
-        tt_log("INFO", "Initializing controller...")
+        tt_log("INFO", "Initializing controller (init1 + init2) ...")
+        # init step 1
+        self._send_raw(b'\x28\x01' + b'\x00' * 62)
+        # init step 2
+        self._send_raw(b'\x29\x02' + b'\x00' * 62)
+        time.sleep(0.3)
+        try:
+            resp = self.dev.read(0x81, 64, timeout=1000) if self._backend == "pyusb" else self._hidraw_read(65, timeout=1000)
+            resp_bytes = bytes(resp) if not isinstance(resp, bytes) else resp
+            # Strip report ID byte (first byte) for hidraw
+            if self._backend == "hidraw" and len(resp_bytes) == 65:
+                resp_bytes = resp_bytes[1:]
+            tt_log("DEBUG", f"Init response: {len(resp_bytes)} bytes — {resp_bytes[:32].hex()}")
+            if len(resp_bytes) >= 33:
+                self._fan_count = [min(max(resp_bytes[16 + i], 1), 5) for i in range(MAX_CHANNELS)]
+                tt_log("INFO", f"Fan counts per channel: {self._fan_count}")
+            else:
+                tt_log("WARNING", "Init response too short — using defaults")
+        except Exception as e:
+            tt_log("WARNING", f"Init read failed: {e} — using defaults")
 
-        init_buf = bytes([0xFE, 0x33]) + bytes(62)
-        self._send_report(0x00, init_buf)
+    def _send_raw(self, data: bytes):
+        raw = data[:64].ljust(64, b'\x00')
+        if self.test_mode or self.dev is None:
+            return
+        try:
+            if self._backend == "hidraw":
+                # HID report: 1 byte report ID (0x00) + 64 bytes data = 65 bytes total
+                hid_report = b'\x00' + raw
+                written = os.write(self.dev, hid_report)
+                tt_log("DEBUG", f"hidraw write: {written}/65 bytes")
+            else:
+                written = self.dev.write(0x02, raw, timeout=1000)
+                tt_log("DEBUG", f"USB write: {written}/64 bytes")
+        except Exception as e:
+            tt_log("ERROR", f"USB write failed: {e}")
 
-        time.sleep(1.0)  # Give controller time to respond
+    def _read_resp(self, timeout=1000) -> list:
+        if self.test_mode or self.dev is None:
+            return []
+        try:
+            if self._backend == "hidraw":
+                return self._hidraw_read(65, timeout=timeout)
+            else:
+                resp = self.dev.read(0x81, 64, timeout=timeout)
+                tt_log("DEBUG", f"USB read: {len(resp)} bytes")
+                return resp
+        except Exception as e:
+            tt_log("WARNING", f"USB read failed: {e}")
+            return []
 
-        # Try to read response (may timeout — that's OK)
-        resp = self._read_report(1000)
-        if resp:
-            tt_log("DEBUG", f"Init response: {resp[:16].hex()}")
-        else:
-            tt_log("DEBUG", "No init response (normal for Riing)")
+    def _hidraw_read(self, size: int, timeout: int = 1000) -> bytes:
+        """Read from hidraw device with timeout (ms)."""
+        import select
+        fd = self.dev
+        # Use select for timeout
+        ready, _, _ = select.select([fd], [], [], timeout / 1000.0)
+        if not ready:
+            return b''
+        data = os.read(fd, size)
+        tt_log("DEBUG", f"hidraw read: {len(data)} bytes")
+        # Strip report ID (first byte) and return 64 bytes
+        if len(data) == 65:
+            return data[1:]
+        return bytes(data)
 
     # ── public API ──
-
     @property
     def num_fans(self) -> list:
         return self._fan_count
 
     def set_color(self, channel: int, colors: list):
-        """Set per-LED colors. `colors` = list of (R,G,B), up to 12 LEDs."""
-        if self.test_mode or self.fd is None:
-            return
-        # HID report: [0x00][0x32][0x52][port][mode|speed][GRB0][GRB1]...[GRB11]
-        # Port is 1-indexed, mode|speed uses mode from current_mode, default speed=1
-        mode_byte = self._current_mode | 0x01  # default speed=1
-
-        data = bytearray()
-        data += bytes([0x32, 0x52])        # command
-        data += bytes([channel + 1])        # port (1-indexed)
-        data += bytes([mode_byte])          # mode | speed
-
+        """
+        Set per-LED colors on one channel.
+        `colors` is a list of (R, G, B) tuples, length <= LEDS_PER_FAN.
+        The controller expects packed BGR per LED.
+        """
+        payload = bytearray()
         for r, g, b in colors[:LEDS_PER_FAN]:
-            data += bytes([g, r, b])        # GRB order!
-        # Pad remaining LEDs
-        while len(data) < 5 + LEDS_PER_FAN * 3:
-            data += b'\x00'
-
-        self._send_report(0x00, bytes(data))
-
-        self._last_colors = colors
+            payload += bytes([b, g, r])
+        while len(payload) < LEDS_PER_FAN * 3:
+            payload += b'\x00'
+        pkt = build_packet(CMD_SETCOLOR, channel, bytes(payload))
         tt_log("INFO", f"set_color ch={channel} first_color=({colors[0] if colors else '?'})")
+        self._send_raw(pkt)
 
     def set_speed(self, channel: int, percent: int):
-        """Set PWM fan speed 0-100%. NOTE: Not confirmed working —
-        fan control on Riing Plus may need a separate HID command."""
+        """Set PWM fan speed for one channel (0-100 %)."""
         val = max(0, min(100, percent))
-        # Attempt fan control command (speculative — OpenRGB uses SendFan with
-        # [0x00][0x32][0x51][port][percent, 0x00, 0x00, 0x00, 0x00, 0x00])
-        data = bytes([0x32, 0x51, channel + 1, val, 0x00, 0x00, 0x00, 0x00, 0x00])
-        self._send_report(0x00, data)
-        tt_log("INFO", f"set_speed ch={channel} percent={val}% (HID fan command)")
+        pkt = build_packet(CMD_SETSPEED, channel, bytes([val]))
+        tt_log("INFO", f"set_speed ch={channel} percent={val}%")
+        self._send_raw(pkt)
 
-    def set_mode(self, channel: int, mode: int, effect_speed: int = 1, direction: int = 0):
-        """Change lighting mode. Mode change is embedded in the color report."""
-        self._current_mode = mode
-        # The mode is applied on next set_color() call (mode|speed byte)
+    def set_mode(self, channel: int, mode: int, speed: int = 0x01, direction: int = 0x00):
+        """Set lighting effect mode for a channel."""
+        pkt = build_packet(CMD_SETMODE, channel, bytes([mode, speed, direction]))
         mode_name = RGB_EFFECTS.get(mode, f"0x{mode:02x}")
-        tt_log("INFO", f"set_mode ch={channel} mode={mode_name} speed={effect_speed}")
+        tt_log("INFO", f"set_mode ch={channel} mode={mode_name} speed={speed} dir={direction}")
+        self._send_raw(pkt)
 
     def apply(self):
-        """No separate apply needed for HID — each write goes directly."""
-        tt_log("INFO", "apply() — HID writes are immediate (no buffer/apply)")
+        """Push pending config to the controller."""
+        tt_log("INFO", "apply() — pushing config to controller")
+        self._send_raw(build_packet(CMD_APPLY, 0x00, b''))
 
     def all_off(self):
         """Turn off all LEDs and stop all fans."""
@@ -491,570 +621,579 @@ class TTController:
         self.apply()
 
     def close(self):
-        if self.fd is not None:
-            try:
-                os.close(self.fd)
-            except OSError:
-                pass
-            self.fd = None
+        if self.test_mode or self.dev is None:
+            return
+        try:
+            if self._backend == "hidraw":
+                os.close(self.dev)
+            else:
+                usb.util.release_interface(self.dev, self.iface)
+                self.dev.attach_kernel_driver(0)
+        except Exception:
+            pass
 
     def __del__(self):
         self.close()
 
 
 # ─────────────────────────────────────────────
-#  Ring LED Preview (custom widget)
+#  GUI Classes (only defined when PyQt5 is available)
 # ─────────────────────────────────────────────
-class RingWidget(QWidget):
-    """Circular LED ring preview mimicking the Riing Plus look."""
+if HAS_QT:
 
-    def __init__(self, led_count=LEDS_PER_FAN, parent=None):
-        super().__init__(parent)
-        self.led_count = led_count
-        self.led_colors = [(255, 100, 0)] * led_count
-        self.setFixedSize(200, 200)
-        self.setToolTip("Riing Plus LED-Vorschau")
+    # ── Ring LED Preview ──
+    class RingWidget(QWidget):
+        """Circular LED ring preview mimicking the Riing Plus look."""
 
-    def set_colors(self, colors):
-        self.led_colors = colors[:self.led_count]
-        self.update()
+        def __init__(self, led_count=LEDS_PER_FAN, parent=None):
+            super().__init__(parent)
+            self.led_count = led_count
+            self.led_colors = [(255, 100, 0)] * led_count
+            self.setFixedSize(200, 200)
+            self.setToolTip("Riing Plus LED-Vorschau")
 
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        cx = self.width() // 2
-        cy = self.height() // 2
-        outer_r = min(cx, cy) - 8
-        inner_r = outer_r - 14
-        led_a = 360 / self.led_count
+        def set_colors(self, colors):
+            self.led_colors = colors[:self.led_count]
+            self.update()
 
-        for i, (r, g, b) in enumerate(self.led_colors):
-            angle = math.radians(i * led_a - 90)
-            x = int(cx + math.cos(angle) * ((outer_r + inner_r) / 2))
-            y = int(cy + math.sin(angle) * ((outer_r + inner_r) / 2))
-            radius = max(4, int((outer_r - inner_r) / 2 - 1))
-            p.setBrush(QBrush(QColor(r, g, b)))
-            p.setPen(Qt.NoPen)
-            rx = x - radius
-            ry = y - radius
-            p.drawEllipse(rx, ry, radius * 2, radius * 2)
+        def paintEvent(self, event):
+            p = QPainter(self)
+            p.setRenderHint(QPainter.Antialiasing)
+            cx = self.width() // 2
+            cy = self.height() // 2
+            outer_r = min(cx, cy) - 8
+            inner_r = outer_r - 14
+            led_a = 360 / self.led_count
 
-        # centre circle (fan hub)
-        p.setBrush(QBrush(QColor(30, 30, 30)))
-        p.setPen(QPen(QColor(80, 80, 80), 1))
-        cxr = cx - inner_r + 2
-        cyr = cy - inner_r + 2
-        sz = int((inner_r - 2) * 2)
-        p.drawEllipse(int(cxr), int(cyr), sz, sz)
-        p.end()
+            for i, (r, g, b) in enumerate(self.led_colors):
+                angle = math.radians(i * led_a - 90)
+                x = int(cx + math.cos(angle) * ((outer_r + inner_r) / 2))
+                y = int(cy + math.sin(angle) * ((outer_r + inner_r) / 2))
+                radius = max(4, int((outer_r - inner_r) / 2 - 1))
+                p.setBrush(QBrush(QColor(r, g, b)))
+                p.setPen(Qt.NoPen)
+                rx = x - radius
+                ry = y - radius
+                p.drawEllipse(rx, ry, radius * 2, radius * 2)
+
+            # centre circle (fan hub)
+            p.setBrush(QBrush(QColor(30, 30, 30)))
+            p.setPen(QPen(QColor(80, 80, 80), 1))
+            cxr = cx - inner_r + 2
+            cyr = cy - inner_r + 2
+            sz = int((inner_r - 2) * 2)
+            p.drawEllipse(int(cxr), int(cyr), sz, sz)
+            p.end()
 
 
-# ─────────────────────────────────────────────
-#  Channel Control Widget (per channel)
-# ─────────────────────────────────────────────
-class ChannelControl(QWidget):
-    """Full controls for one channel: speed, color, effect."""
+    # ── Channel Control Widget ──
+    class ChannelControl(QWidget):
+        """Full controls for one channel: speed, color, effect."""
 
-    def __init__(self, channel_idx: int, num_fans: int, controller: TTController, parent=None):
-        super().__init__(parent)
-        self.ch  = channel_idx
-        self.nf  = num_fans
-        self.ctl = controller
-        self._setup_ui()
+        def __init__(self, channel_idx: int, num_fans: int, controller: TTController, parent=None):
+            super().__init__(parent)
+            self.ch  = channel_idx
+            self.nf  = num_fans
+            self.ctl = controller
+            self._setup_ui()
 
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(8)
+        def _setup_ui(self):
+            layout = QVBoxLayout(self)
+            layout.setSpacing(8)
 
-        # ── Ring preview
-        preview_box = QHBoxLayout()
-        preview_box.addWidget(QLabel(f"CH{self.ch + 1}:"))
-        self.ring = RingWidget(LEDS_PER_FAN)
-        preview_box.addWidget(self.ring)
+            # ── Ring preview
+            preview_box = QHBoxLayout()
+            preview_box.addWidget(QLabel(f"CH{self.ch + 1}:"))
+            self.ring = RingWidget(LEDS_PER_FAN)
+            preview_box.addWidget(self.ring)
 
-        # fan count badge
-        self.fan_label = QLabel(f"({self.nf} Lüfter)")
-        preview_box.addWidget(self.fan_label)
-        preview_box.addStretch()
-        layout.addLayout(preview_box)
+            # fan count badge
+            self.fan_label = QLabel(f"({self.nf} Lüfter)")
+            preview_box.addWidget(self.fan_label)
+            preview_box.addStretch()
+            layout.addLayout(preview_box)
 
-        # ── Fan Speed ──
-        speed_group = QGroupBox("Lüftergeschwindigkeit (PWM)")
-        sl = QHBoxLayout()
+            # ── Fan Speed ──
+            speed_group = QGroupBox("Lüftergeschwindigkeit (PWM)")
+            sl = QHBoxLayout()
 
-        self.speed_slider = QSlider(Qt.Horizontal)
-        self.speed_slider.setRange(0, 100)
-        self.speed_slider.setValue(50)
-        self.speed_slider.setTickInterval(10)
-        self.speed_slider.setTickPosition(QSlider.TicksBelow)
-        self.speed_slider.valueChanged.connect(self._on_speed_changed)
+            self.speed_slider = QSlider(Qt.Horizontal)
+            self.speed_slider.setRange(0, 100)
+            self.speed_slider.setValue(50)
+            self.speed_slider.setTickInterval(10)
+            self.speed_slider.setTickPosition(QSlider.TicksBelow)
+            self.speed_slider.valueChanged.connect(self._on_speed_changed)
 
-        self.speed_label = QLabel("50%")
-        self.speed_label.setMinimumWidth(40)
+            self.speed_label = QLabel("50%")
+            self.speed_label.setMinimumWidth(40)
 
-        sl.addWidget(self.speed_slider)
-        sl.addWidget(self.speed_label)
-        speed_group.setLayout(sl)
-        layout.addWidget(speed_group)
+            sl.addWidget(self.speed_slider)
+            sl.addWidget(self.speed_label)
+            speed_group.setLayout(sl)
+            layout.addWidget(speed_group)
 
-        # Speed preset buttons
-        preset_row = QHBoxLayout()
-        for name, val in FAN_SPEED_PRESETS.items():
-            btn = QPushButton(name)
-            btn.clicked.connect(partial(self._set_preset, val, name))
-            preset_row.addWidget(btn)
-        layout.addLayout(preset_row)
+            # Speed preset buttons
+            preset_row = QHBoxLayout()
+            for name, val in FAN_SPEED_PRESETS.items():
+                btn = QPushButton(name)
+                btn.clicked.connect(partial(self._set_preset, val, name))
+                preset_row.addWidget(btn)
+            layout.addLayout(preset_row)
 
-        # ── RGB Effect ──
-        effect_group = QGroupBox("RGB-Effekt")
-        ef = QVBoxLayout()
+            # ── RGB Effect ──
+            effect_group = QGroupBox("RGB-Effekt")
+            ef = QVBoxLayout()
 
-        effect_top = QHBoxLayout()
-        effect_top.addWidget(QLabel("Modus:"))
-        self.effect_combo = QComboBox()
-        self.effect_combo.addItems(list(RGB_EFFECTS.values()))
-        self.effect_combo.currentTextChanged.connect(self._on_effect_changed)
-        effect_top.addWidget(self.effect_combo)
-        effect_top.addStretch()
-        ef.addLayout(effect_top)
+            effect_top = QHBoxLayout()
+            effect_top.addWidget(QLabel("Modus:"))
+            self.effect_combo = QComboBox()
+            self.effect_combo.addItems(list(RGB_EFFECTS.values()))
+            self.effect_combo.currentTextChanged.connect(self._on_effect_changed)
+            effect_top.addWidget(self.effect_combo)
+            effect_top.addStretch()
+            ef.addLayout(effect_top)
 
-        effect_bot = QHBoxLayout()
-        effect_bot.addWidget(QLabel("Geschwindigkeit:"))
-        self.efx_speed_combo = QComboBox()
-        self.efx_speed_combo.addItems(list(EFFECT_SPEED_MAP.keys()))
-        effect_bot.addWidget(self.efx_speed_combo)
+            effect_bot = QHBoxLayout()
+            effect_bot.addWidget(QLabel("Geschwindigkeit:"))
+            self.efx_speed_combo = QComboBox()
+            self.efx_speed_combo.addItems(list(EFFECT_SPEED_MAP.keys()))
+            effect_bot.addWidget(self.efx_speed_combo)
 
-        effect_bot.addWidget(QLabel("    Richtung:"))
-        self.dir_combo = QComboBox()
-        self.dir_combo.addItems(["Links → Rechts", "Rechts → Links"])
-        effect_bot.addWidget(self.dir_combo)
-        effect_bot.addStretch()
-        ef.addLayout(effect_bot)
+            effect_bot.addWidget(QLabel("    Richtung:"))
+            self.dir_combo = QComboBox()
+            self.dir_combo.addItems(["Links → Rechts", "Rechts → Links"])
+            effect_bot.addWidget(self.dir_combo)
+            effect_bot.addStretch()
+            ef.addLayout(effect_bot)
 
-        effect_group.setLayout(ef)
-        layout.addWidget(effect_group)
+            effect_group.setLayout(ef)
+            layout.addWidget(effect_group)
 
-        # ── Color Picker ──
-        color_group = QGroupBox("Farbe (funktioniert nur bei Static)")
-        cl = QHBoxLayout()
+            # ── Color Picker ──
+            color_group = QGroupBox("Farbe (funktioniert nur bei Static)")
+            cl = QHBoxLayout()
 
-        self.color_btn = QPushButton("Farbe wählen…")
-        self.color_btn.clicked.connect(self._pick_color)
+            self.color_btn = QPushButton("Farbe wählen…")
+            self.color_btn.clicked.connect(self._pick_color)
 
-        self.color_preview = QFrame()
-        self.color_preview.setFixedSize(36, 36)
-        self.color_preview.setStyleSheet("background-color: rgb(255,100,0); border-radius: 4px;")
+            self.color_preview = QFrame()
+            self.color_preview.setFixedSize(36, 36)
+            self.color_preview.setStyleSheet("background-color: rgb(255,100,0); border-radius: 4px;")
 
-        self.current_color = QColor(255, 100, 0)
+            self.current_color = QColor(255, 100, 0)
 
-        cl.addWidget(self.color_btn)
-        cl.addWidget(self.color_preview)
-        cl.addStretch()
-        color_group.setLayout(cl)
-        layout.addWidget(color_group)
+            cl.addWidget(self.color_btn)
+            cl.addWidget(self.color_preview)
+            cl.addStretch()
+            color_group.setLayout(cl)
+            layout.addWidget(color_group)
 
-        # ── Apply ──
-        apply_btn = QPushButton("⚠️ Auf Kanal anwenden")
-        apply_btn.setStyleSheet(
-            "QPushButton { background-color: #e67e22; color: white; font-weight: bold;"
-            "padding: 8px; border-radius: 6px; }"
-            "QPushButton:hover { background-color: #d35400; }"
-        )
-        apply_btn.clicked.connect(self._apply)
-        layout.addWidget(apply_btn)
-
-        layout.addStretch()
-
-    # ── slots ──
-    def _on_speed_changed(self, val):
-        self.speed_label.setText(f"{val}%")
-
-    def _on_effect_changed(self, effect_name: str):
-        is_static = effect_name == "Static"
-        self.color_btn.setEnabled(is_static)
-        self.color_preview.setEnabled(is_static)
-
-    def _set_preset(self, value: int, name: str):
-        self.speed_slider.setValue(value)
-
-    def _pick_color(self):
-        c = QColorDialog.getColor(self.current_color, self, "RGB-Farbe wählen")
-        if c.isValid():
-            self.current_color = c
-            self.color_preview.setStyleSheet(
-                f"background-color: rgb({c.red()},{c.green()},{c.blue()}); border-radius: 4px;"
+            # ── Apply ──
+            apply_btn = QPushButton("⚠️ Auf Kanal anwenden")
+            apply_btn.setStyleSheet(
+                "QPushButton { background-color: #e67e22; color: white; font-weight: bold;"
+                "padding: 8px; border-radius: 6px; }"
+                "QPushButton:hover { background-color: #d35400; }"
             )
-            colors = [(c.red(), c.green(), c.blue())] * LEDS_PER_FAN
-            self.ring.set_colors(colors)
+            apply_btn.clicked.connect(self._apply)
+            layout.addWidget(apply_btn)
 
-    def _apply(self):
-        """Send all settings for this channel to the controller."""
-        if self.ctl.test_mode:
-            QMessageBox.information(self, "Demo-Modus",
-                "USB-Gerät nicht gefunden — Einstellungen würden gesendet werden.\n"
-                "Füge udev-Regel hinzu & stecke Controller ein.")
-            return
+            layout.addStretch()
 
-        try:
-            # Speed
-            self.ctl.set_speed(self.ch, self.speed_slider.value())
+        # ── slots ──
+        def _on_speed_changed(self, val):
+            self.speed_label.setText(f"{val}%")
 
-            # Effect mode (find key by value)
-            eff_name = self.effect_combo.currentText()
-            mode_key = [k for k, v in RGB_EFFECTS.items() if v == eff_name][0]
-            efx_spd = EFFECT_SPEED_MAP.get(self.efx_speed_combo.currentText(), 0x01)
-            direction = 0 if self.dir_combo.currentIndex() == 0 else 1
-            self.ctl.set_mode(self.ch, mode_key, efx_spd, direction)
+        def _on_effect_changed(self, effect_name: str):
+            is_static = effect_name == "Static"
+            self.color_btn.setEnabled(is_static)
+            self.color_preview.setEnabled(is_static)
 
-            # Color (only meaningful for Static)
-            if eff_name == "Static":
-                c = self.current_color
-                colors = [(c.red(), c.green(), c.blue())] * LEDS_PER_FAN
-                self.ctl.set_color(self.ch, colors)
+        def _set_preset(self, value: int, name: str):
+            self.speed_slider.setValue(value)
 
-            self.ctl.apply()
-        except Exception as e:
-            QMessageBox.warning(self, "Fehler", f"Konnte Befehl nicht senden:\n{e}")
-
-
-# ─────────────────────────────────────────────
-#  Log Window (live log viewer)
-# ─────────────────────────────────────────────
-class LogWindow(QDialog):
-    """Floating log window — shows live tt_log output."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("🔍 TT Riing Plus — Log")
-        self.setMinimumSize(750, 500)
-        self.setStyleSheet("""
-            QDialog { background: #1e1e1e; }
-            QTextEdit { background: #0d0d0d; color: #aaa; font-family: monospace; font-size: 12px; border: none; }
-        """)
-
-        lay = QVBoxLayout(self)
-
-        # Controls
-        ctrl = QHBoxLayout()
-        clear_btn = QPushButton("🗑 Leeren")
-        clear_btn.clicked.connect(self._clear)
-        ctrl.addWidget(clear_btn)
-
-        save_btn = QPushButton("💾 Speichern")
-        save_btn.clicked.connect(self._save_log)
-        ctrl.addWidget(save_btn)
-
-        self.level_filter = QComboBox()
-        self.level_filter.addItems(["Alle", "INFO", "WARNING", "ERROR", "DEBUG"])
-        self.level_filter.currentTextChanged.connect(self._refilter)
-        ctrl.addWidget(QLabel("Filter:"))
-        ctrl.addWidget(self.level_filter)
-
-        ctrl.addStretch()
-        close_btn = QPushButton("✕ Schließen")
-        close_btn.clicked.connect(self.close)
-        ctrl.addWidget(close_btn)
-        lay.addLayout(ctrl)
-
-        # Log text
-        self.log_text = QPlainTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.log_text.setMaximumBlockCount(2000)
-        lay.addWidget(self.log_text)
-
-        # Poll log queue via QTimer (thread-safe — runs on GUI thread)
-        self._log_timer = QTimer(self)
-        self._log_timer.timeout.connect(self._poll_log_queue)
-        self._log_timer.start(200)  # ms
-
-    def _poll_log_queue(self):
-        """Drain the log queue — called on GUI thread via QTimer."""
-        while True:
-            try:
-                level, msg = _log_queue.get_nowait()
-            except queue.Empty:
-                break
-            colors = {
-                "DEBUG":    "#888",
-                "INFO":     "#aaa",
-                "WARNING":  "#f39c12",
-                "ERROR":    "#e74c3c",
-            }
-            color = colors.get(level, "#aaa")
-            import datetime
-            ts = datetime.datetime.now().strftime("%H:%M:%S")
-            line = (f'<span style="color:#666">{ts}</span>  '
-                    f'<span style="color:{color}">[{level:>7}]</span>  '
-                    f'<span style="color:{color}">{msg}</span>')
-            self.log_text.appendHtml(line)
-
-    def _clear(self):
-        self.log_text.clear()
-
-    def _save_log(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Log speichern", LOG_FILE, "Log (*.log *.txt)")
-        if path:
-            with open(path, "w") as f:
-                f.write(self.log_text.toPlainText())
-            tt_log("INFO", f"Log saved to {path}")
-
-    def _refilter(self):
-        # Re-read from log file
-        level = self.level_filter.currentText()
-        self.log_text.clear()
-        if not os.path.exists(LOG_FILE):
-            return
-        colors = {"DEBUG": "#888", "INFO": "#aaa", "WARNING": "#f39c12", "ERROR": "#e74c3c"}
-        with open(LOG_FILE) as f:
-            for line in f:
-                line = line.rstrip()
-                if level != "Alle" and f"[{level:>7}]" not in line:
-                    continue
-                color = "#aaa"
-                for lvl, c in colors.items():
-                    if f"[{lvl:>7}]" in line:
-                        color = c
-                        break
-                ts_end = line.find("]") + 1 if "]" in line else 0
-                ts = line[:ts_end]
-                rest = line[ts_end:]
-                self.log_text.appendHtml(
-                    f'<span style="color:#666">{ts}</span>'
-                    f'<span style="color:{color}">{rest}</span>'
+        def _pick_color(self):
+            c = QColorDialog.getColor(self.current_color, self, "RGB-Farbe wählen")
+            if c.isValid():
+                self.current_color = c
+                self.color_preview.setStyleSheet(
+                    f"background-color: rgb({c.red()},{c.green()},{c.blue()}); border-radius: 4px;"
                 )
+                colors = [(c.red(), c.green(), c.blue())] * LEDS_PER_FAN
+                self.ring.set_colors(colors)
 
-    def closeEvent(self, event):
-        self._log_timer.stop()
-        event.accept()
+        def _apply(self):
+            """Send all settings for this channel to the controller."""
+            if self.ctl.test_mode:
+                QMessageBox.information(self, "Demo-Modus",
+                    "USB-Gerät nicht gefunden — Einstellungen würden gesendet werden.\n"
+                    "Füge udev-Regel hinzu & stecke Controller ein.")
+                return
 
+            try:
+                # Speed
+                self.ctl.set_speed(self.ch, self.speed_slider.value())
 
-# ─────────────────────────────────────────────
-#  Diagnostic Dialog
-# ─────────────────────────────────────────────
-class DiagnosticDialog(QDialog):
-    """Shows output of controller.diagnose() for USB troubleshooting."""
+                # Effect mode (find key by value)
+                eff_name = self.effect_combo.currentText()
+                mode_key = [k for k, v in RGB_EFFECTS.items() if v == eff_name][0]
+                efx_spd = EFFECT_SPEED_MAP.get(self.efx_speed_combo.currentText(), 0x01)
+                direction = 0 if self.dir_combo.currentIndex() == 0 else 1
+                self.ctl.set_mode(self.ch, mode_key, efx_spd, direction)
 
-    def __init__(self, controller: TTController, parent=None):
-        super().__init__(parent)
-        self.controller = controller
-        self.setWindowTitle("🔍 USB Diagnose")
-        self.setMinimumSize(700, 500)
-        self.setStyleSheet("""
-            QDialog { background: #2b2b2b; color: #e0e0e0; }
-            QTextEdit { background: #0d0d0d; color: #2ecc71; font-family: monospace; font-size: 11px; }
-            QPushButton { background: #3a3a3a; padding: 6px 12px; border-radius: 4px; }
-        """)
+                # Color (only meaningful for Static)
+                if eff_name == "Static":
+                    c = self.current_color
+                    colors = [(c.red(), c.green(), c.blue())] * LEDS_PER_FAN
+                    self.ctl.set_color(self.ch, colors)
 
-        lay = QVBoxLayout(self)
-
-        info = QLabel(
-            "USB-Hilfsdiagnose — zeigt alle gefundenen USB-Geräte, "
-            "Berechtigungen und Kernel-Driver-Status."
-        )
-        info.setWordWrap(True)
-        lay.addWidget(info)
-
-        self.output = QPlainTextEdit()
-        self.output.setReadOnly(True)
-        lay.addWidget(self.output)
-
-        btn_row = QHBoxLayout()
-        run_btn = QPushButton("🔄 Neu scannen")
-        run_btn.clicked.connect(self._run)
-        btn_row.addWidget(run_btn)
-
-        save_btn = QPushButton("💾 Als Datei speichern")
-        save_btn.clicked.connect(self._save)
-        btn_row.addWidget(save_btn)
-
-        btn_row.addStretch()
-        close_btn = QPushButton("✕ Schließen")
-        close_btn.clicked.connect(self.close)
-        btn_row.addWidget(close_btn)
-        lay.addLayout(btn_row)
-
-        self._run()
-
-    def _run(self):
-        self.output.setPlainText("Scanne USB-Bus ...\n")
-        QApplication.processEvents()
-        # Run synchronously on GUI thread — avoids thread-safety issues
-        # with Qt widget access from foreign threads (which causes segfault).
-        # The USB scan takes ~1-2s max.
-        try:
-            result = self.controller.diagnose()
-            self.output.setPlainText(result)
-        except Exception as e:
-            self.output.setPlainText(f"FEHLER bei der Diagnose:\n{e}")
-
-    def _save(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Diagnose speichern", "tt-diagnose.txt", "Text (*.txt)")
-        if path:
-            with open(path, "w") as f:
-                f.write(self.output.toPlainText())
+                self.ctl.apply()
+            except Exception as e:
+                QMessageBox.warning(self, "Fehler", f"Konnte Befehl nicht senden:\n{e}")
 
 
-# ─────────────────────────────────────────────
-#  Main Window
-# ─────────────────────────────────────────────
-class MainWindow(QMainWindow):
-    """Thermaltake Riing Plus — Linux Control Centre."""
+    # ── Log Window ──
+    class LogWindow(QDialog):
+        """Floating log window — shows live tt_log output."""
 
-    def __init__(self):
-        super().__init__()
-        self.controller = TTController(test_mode=False)
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.setWindowTitle("🔍 TT Riing Plus — Log")
+            self.setMinimumSize(750, 500)
+            self.setStyleSheet("""
+                QDialog { background: #1e1e1e; }
+                QTextEdit { background: #0d0d0d; color: #aaa; font-family: monospace; font-size: 12px; border: none; }
+            """)
 
-        if self.controller.test_mode:
-            # retry without test_mode flag = user can still interact
-            self.statusBar().showMessage("⚠️ Kein USB-Gerät gefunden — Demo-Modus aktiv")
-        else:
-            self.statusBar().showMessage("✅ Thermaltake Riing Plus verbunden")
+            lay = QVBoxLayout(self)
 
-        self._setup_ui()
+            # Controls
+            ctrl = QHBoxLayout()
+            clear_btn = QPushButton("🗑 Leeren")
+            clear_btn.clicked.connect(self._clear)
+            ctrl.addWidget(clear_btn)
 
-    def _setup_ui(self):
-        self.setWindowTitle("Thermaltake Riing Plus — Linux Control")
-        self.setMinimumSize(900, 650)
-        self.setStyleSheet("""
-            QMainWindow { background: #2b2b2b; }
-            QWidget   { color: #e0e0e0; font-size: 13px; }
-            QGroupBox {
-                border: 1px solid #555; border-radius: 6px; margin-top: 8px;
-                font-weight: bold; padding: 12px 8px;
-            }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
-            QPushButton { background: #3a3a3a; border: 1px solid #555; padding: 6px 12px; border-radius: 4px; }
-            QPushButton:hover { background: #4a4a4a; }
-            QComboBox  { background: #3a3a3a; padding: 4px; border: 1px solid #555; border-radius: 4px; }
-            QSlider::groove:horizontal { height: 8px; background: #444; border-radius: 4px; }
-            QSlider::handle:horizontal { background: #e67e22; width: 16px; margin: -4px 0; border-radius: 3px; }
-            QLabel  { color: #ccc; }
-            QStatusBar { background: #1a1a1a; color: #aaa; }
-        """)
+            save_btn = QPushButton("💾 Speichern")
+            save_btn.clicked.connect(self._save_log)
+            ctrl.addWidget(save_btn)
 
-        central = QWidget()
-        self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
+            self.level_filter = QComboBox()
+            self.level_filter.addItems(["Alle", "INFO", "WARNING", "ERROR", "DEBUG"])
+            self.level_filter.currentTextChanged.connect(self._refilter)
+            ctrl.addWidget(QLabel("Filter:"))
+            ctrl.addWidget(self.level_filter)
 
-        # ── Header ──
-        header = QHBoxLayout()
-        title = QLabel("🌈 Thermaltake Riing Plus — Linux Fan & RGB Control")
-        title.setFont(QFont("Sans", 18, QFont.Bold))
-        title.setStyleSheet("color: #e67e22;")
-        header.addWidget(title)
-        header.addStretch()
+            ctrl.addStretch()
+            close_btn = QPushButton("✕ Schließen")
+            close_btn.clicked.connect(self.close)
+            ctrl.addWidget(close_btn)
+            lay.addLayout(ctrl)
 
-        # USB status indicator — zeigt erkannten Controller-Namen + PID
-        if self.controller.test_mode:
-            usb_text = "🔌 USB: NICHT VERBUNDEN"
-            usb_color = "#e74c3c"
-        else:
-            name = getattr(self.controller, '_detected_name', 'Unknown')
-            pid  = getattr(self.controller, '_detected_pid', 0)
-            usb_text = f"🔌 USB: {name} (PID {pid:#06x})"
-            usb_color = "#2ecc71"
-        self.usb_status = QLabel(usb_text)
-        self.usb_status.setStyleSheet(f"color: {usb_color};")
-        header.addWidget(self.usb_status)
-        main_layout.addLayout(header)
+            # Log text
+            self.log_text = QPlainTextEdit()
+            self.log_text.setReadOnly(True)
+            self.log_text.setLineWrapMode(QPlainTextEdit.NoWrap)
+            self.log_text.setMaximumBlockCount(2000)
+            lay.addWidget(self.log_text)
 
-        # ── Channel Tabs ──
-        self.tabs = QTabWidget()
-        self.tab_widgets = []
-        for ch in range(MAX_CHANNELS):
-            nc = ChannelControl(ch, self.controller.num_fans[ch], self.controller)
-            self.tab_widgets.append(nc)
-            self.tabs.addTab(nc, f"  CH {ch + 1}  ")
-        main_layout.addWidget(self.tabs)
+            # Poll log queue via QTimer (thread-safe — runs on GUI thread)
+            self._log_timer = QTimer(self)
+            self._log_timer.timeout.connect(self._poll_log_queue)
+            self._log_timer.start(200)  # ms
 
-        # ── Global Actions ──
-        global_group = QGroupBox("Globale Aktionen")
-        gl = QHBoxLayout()
+        def _poll_log_queue(self):
+            """Drain the log queue — called on GUI thread via QTimer."""
+            while True:
+                try:
+                    level, msg = _log_queue.get_nowait()
+                except queue.Empty:
+                    break
+                colors = {
+                    "DEBUG":    "#888",
+                    "INFO":     "#aaa",
+                    "WARNING":  "#f39c12",
+                    "ERROR":    "#e74c3c",
+                }
+                color = colors.get(level, "#aaa")
+                import datetime
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                line = (f'<span style="color:#666">{ts}</span>  '
+                        f'<span style="color:{color}">[{level:>7}]</span>  '
+                        f'<span style="color:{color}">{msg}</span>')
+                self.log_text.appendHtml(line)
 
-        self.all_apply = QPushButton("✅ Alle anwenden")
-        self.all_apply.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
-        self.all_apply.clicked.connect(self._apply_all)
-        gl.addWidget(self.all_apply)
+        def _clear(self):
+            self.log_text.clear()
 
-        self.all_off = QPushButton("⏻ Alles AUS")
-        self.all_off.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
-        self.all_off.clicked.connect(self._all_off)
-        gl.addWidget(self.all_off)
+        def _save_log(self):
+            path, _ = QFileDialog.getSaveFileName(self, "Log speichern", LOG_FILE, "Log (*.log *.txt)")
+            if path:
+                with open(path, "w") as f:
+                    f.write(self.log_text.toPlainText())
+                tt_log("INFO", f"Log saved to {path}")
 
-        self.help_btn = QPushButton("❓ Hilfe")
-        self.help_btn.clicked.connect(self._show_help)
-        gl.addWidget(self.help_btn)
+        def _refilter(self):
+            # Re-read from log file
+            level = self.level_filter.currentText()
+            self.log_text.clear()
+            if not os.path.exists(LOG_FILE):
+                return
+            colors = {"DEBUG": "#888", "INFO": "#aaa", "WARNING": "#f39c12", "ERROR": "#e74c3c"}
+            with open(LOG_FILE) as f:
+                for line in f:
+                    line = line.rstrip()
+                    if level != "Alle" and f"[{level:>7}]" not in line:
+                        continue
+                    color = "#aaa"
+                    for lvl, c in colors.items():
+                        if f"[{lvl:>7}]" in line:
+                            color = c
+                            break
+                    ts_end = line.find("]") + 1 if "]" in line else 0
+                    ts = line[:ts_end]
+                    rest = line[ts_end:]
+                    self.log_text.appendHtml(
+                        f'<span style="color:#666">{ts}</span>'
+                        f'<span style="color:{color}">{rest}</span>'
+                    )
 
-        self.log_btn = QPushButton("📋 Log")
-        self.log_btn.clicked.connect(self._show_log)
-        gl.addWidget(self.log_btn)
+        def closeEvent(self, event):
+            self._log_timer.stop()
+            event.accept()
 
-        self.diag_btn = QPushButton("🔍 Diagnose")
-        self.diag_btn.clicked.connect(self._show_diagnose)
-        gl.addWidget(self.diag_btn)
 
-        gl.addStretch()
-        global_group.setLayout(gl)
-        main_layout.addWidget(global_group)
+    # ── Diagnostic Dialog ──
+    class DiagnosticDialog(QDialog):
+        """Shows output of controller.diagnose() for USB troubleshooting."""
 
-    def _apply_all(self):
-        """Apply settings for all channels at once."""
-        for w in self.tab_widgets:
-            w._apply()
+        def __init__(self, controller: TTController, parent=None):
+            super().__init__(parent)
+            self.controller = controller
+            self.setWindowTitle("🔍 USB Diagnose")
+            self.setMinimumSize(700, 500)
+            self.setStyleSheet("""
+                QDialog { background: #2b2b2b; color: #e0e0e0; }
+                QTextEdit { background: #0d0d0d; color: #2ecc71; font-family: monospace; font-size: 11px; }
+                QPushButton { background: #3a3a3a; padding: 6px 12px; border-radius: 4px; }
+            """)
 
-    def _all_off(self):
-        if self.controller.test_mode:
-            QMessageBox.information(self, "Demo-Modus",
-                "USB-Gerät nicht verbunden — nichts zu tun.")
-            return
-        self.controller.all_off()
-        self.statusBar().showMessage("Alle Lüfter & LEDs ausgeschaltet", 3000)
+            lay = QVBoxLayout(self)
 
-    def _show_help(self):
-        # Dynamisch alle unterstützten PIDs auflisten
-        pid_list = ", ".join(f"<code>{p:#06x}</code>" for p in TT_CONTROLLERS)
-        udev_line = (
-            'SUBSYSTEM=="usb", ATTR{idVendor}=="264a", '
-            'ATTR{idProduct}=="*", MODE="0666"'
-        )
+            info = QLabel(
+                "USB-Hilfsdiagnose — zeigt alle gefundenen USB-Geräte, "
+                "Berechtigungen und Kernel-Driver-Status."
+            )
+            info.setWordWrap(True)
+            lay.addWidget(info)
 
-        QMessageBox.information(self, "Hilfe — Thermaltake RGB Control",
-            "<b>Erstmalige Nutzung:</b><br>"
-            "1. Stecke den Thermaltake Controller per USB ein<br>"
-            "2. Erstelle eine udev-Regel für USB-Zugriff ohne root:<br>"
-            f"<code>sudo tee /etc/udev/rules.d/99-thermaltake.rules << 'EOF'<br>"
-            f"{udev_line}<br>"
-            "EOF</code><br>"
-            "3. Reload udev: <code>sudo udevadm control --reload && sudo udevadm trigger</code><br>"
-            "4. App neu starten.<br><br>"
-            f"<b>Unterstützte Controller:</b> {pid_list}<br><br>"
-            "<b>Tipp:</b> Farbe funktioniert nur im 'Static'-Effekt. "
-            "Andere Effekte (Breathing, Wave etc.) benutzen ihre eigenen Farben.<br><br>"
-            "<b>PWM-Bereich:</b> Werte unter ~20% können Lüfter stoppen lassen.<br><br>"
-            "<b>Automatische Erkennung:</b> Die App probiert alle bekannten PIDs durch "
-            "und zeigt den gefundenen Controller im Header an."
-        )
+            self.output = QPlainTextEdit()
+            self.output.setReadOnly(True)
+            lay.addWidget(self.output)
 
-    def _show_log(self):
-        """Open the live log viewer dialog."""
-        dlg = LogWindow(self)
-        dlg.exec_()
+            btn_row = QHBoxLayout()
+            run_btn = QPushButton("🔄 Neu scannen")
+            run_btn.clicked.connect(self._run)
+            btn_row.addWidget(run_btn)
 
-    def _show_diagnose(self):
-        """Open the USB diagnostic dialog."""
-        dlg = DiagnosticDialog(self.controller, self)
-        dlg.exec_()
+            save_btn = QPushButton("💾 Als Datei speichern")
+            save_btn.clicked.connect(self._save)
+            btn_row.addWidget(save_btn)
 
-    def closeEvent(self, event):
-        self.controller.close()
-        event.accept()
+            btn_row.addStretch()
+            close_btn = QPushButton("✕ Schließen")
+            close_btn.clicked.connect(self.close)
+            btn_row.addWidget(close_btn)
+            lay.addLayout(btn_row)
+
+            self._run()
+
+        def _run(self):
+            self.output.setPlainText("Scanne USB-Bus ...\n")
+            QApplication.processEvents()
+            # Run in thread to avoid blocking GUI
+            def _do():
+                result = self.controller.diagnose()
+                # Use signal to update GUI
+                self.output.setPlainText(result)
+            threading.Thread(target=_do, daemon=True).start()
+
+        def _save(self):
+            path, _ = QFileDialog.getSaveFileName(self, "Diagnose speichern", "tt-diagnose.txt", "Text (*.txt)")
+            if path:
+                with open(path, "w") as f:
+                    f.write(self.output.toPlainText())
+
+
+    # ── Main Window ──
+    class MainWindow(QMainWindow):
+        """Thermaltake Riing Plus — Linux Control Centre."""
+
+        def __init__(self):
+            super().__init__()
+            self.controller = TTController(test_mode=False)
+
+            if self.controller.test_mode:
+                # retry without test_mode flag = user can still interact
+                self.statusBar().showMessage("⚠️ Kein USB-Gerät gefunden — Demo-Modus aktiv")
+            else:
+                self.statusBar().showMessage("✅ Thermaltake Riing Plus verbunden")
+
+            self._setup_ui()
+
+        def _setup_ui(self):
+            self.setWindowTitle("Thermaltake Riing Plus — Linux Control")
+            self.setMinimumSize(900, 650)
+            self.setStyleSheet("""
+                QMainWindow { background: #2b2b2b; }
+                QWidget   { color: #e0e0e0; font-size: 13px; }
+                QGroupBox {
+                    border: 1px solid #555; border-radius: 6px; margin-top: 8px;
+                    font-weight: bold; padding: 12px 8px;
+                }
+                QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
+                QPushButton { background: #3a3a3a; border: 1px solid #555; padding: 6px 12px; border-radius: 4px; }
+                QPushButton:hover { background: #4a4a4a; }
+                QComboBox  { background: #3a3a3a; padding: 4px; border: 1px solid #555; border-radius: 4px; }
+                QSlider::groove:horizontal { height: 8px; background: #444; border-radius: 4px; }
+                QSlider::handle:horizontal { background: #e67e22; width: 16px; margin: -4px 0; border-radius: 3px; }
+                QLabel  { color: #ccc; }
+                QStatusBar { background: #1a1a1a; color: #aaa; }
+            """)
+
+            central = QWidget()
+            self.setCentralWidget(central)
+            main_layout = QVBoxLayout(central)
+
+            # ── Header ──
+            header = QHBoxLayout()
+            title = QLabel("🌈 Thermaltake Riing Plus — Linux Fan & RGB Control")
+            title.setFont(QFont("Sans", 18, QFont.Bold))
+            title.setStyleSheet("color: #e67e22;")
+            header.addWidget(title)
+            header.addStretch()
+
+            # USB status indicator — zeigt erkannten Controller-Namen + PID
+            if self.controller.test_mode:
+                usb_text = "🔌 USB: NICHT VERBUNDEN"
+                usb_color = "#e74c3c"
+            else:
+                name = getattr(self.controller, '_detected_name', 'Unknown')
+                pid  = getattr(self.controller, '_detected_pid', 0)
+                usb_text = f"🔌 USB: {name} (PID {pid:#06x})"
+                usb_color = "#2ecc71"
+            self.usb_status = QLabel(usb_text)
+            self.usb_status.setStyleSheet(f"color: {usb_color};")
+            header.addWidget(self.usb_status)
+            main_layout.addLayout(header)
+
+            # ── Channel Tabs ──
+            self.tabs = QTabWidget()
+            self.tab_widgets = []
+            for ch in range(MAX_CHANNELS):
+                nc = ChannelControl(ch, self.controller.num_fans[ch], self.controller)
+                self.tab_widgets.append(nc)
+                self.tabs.addTab(nc, f"  CH {ch + 1}  ")
+            main_layout.addWidget(self.tabs)
+
+            # ── Global Actions ──
+            global_group = QGroupBox("Globale Aktionen")
+            gl = QHBoxLayout()
+
+            self.all_apply = QPushButton("✅ Alle anwenden")
+            self.all_apply.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+            self.all_apply.clicked.connect(self._apply_all)
+            gl.addWidget(self.all_apply)
+
+            self.all_off = QPushButton("⏻ Alles AUS")
+            self.all_off.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
+            self.all_off.clicked.connect(self._all_off)
+            gl.addWidget(self.all_off)
+
+            self.help_btn = QPushButton("❓ Hilfe")
+            self.help_btn.clicked.connect(self._show_help)
+            gl.addWidget(self.help_btn)
+
+            self.log_btn = QPushButton("📋 Log")
+            self.log_btn.clicked.connect(self._show_log)
+            gl.addWidget(self.log_btn)
+
+            self.diag_btn = QPushButton("🔍 Diagnose")
+            self.diag_btn.clicked.connect(self._show_diagnose)
+            gl.addWidget(self.diag_btn)
+
+            gl.addStretch()
+            global_group.setLayout(gl)
+            main_layout.addWidget(global_group)
+
+        def _apply_all(self):
+            """Apply settings for all channels at once."""
+            for w in self.tab_widgets:
+                w._apply()
+
+        def _all_off(self):
+            if self.controller.test_mode:
+                QMessageBox.information(self, "Demo-Modus",
+                    "USB-Gerät nicht verbunden — nichts zu tun.")
+                return
+            self.controller.all_off()
+            self.statusBar().showMessage("Alle Lüfter & LEDs ausgeschaltet", 3000)
+
+        def _show_help(self):
+            # Dynamisch alle unterstützten PIDs auflisten
+            pid_list = ", ".join(f"<code>{p:#06x}</code>" for p in TT_CONTROLLERS)
+            udev_line = (
+                'SUBSYSTEM=="usb", ATTR{idVendor}=="264a", '
+                'ATTR{idProduct}=="*", MODE="0666"'
+            )
+
+            QMessageBox.information(self, "Hilfe — Thermaltake RGB Control",
+                "<b>Erstmalige Nutzung:</b><br>"
+                "1. Stecke den Thermaltake Controller per USB ein<br>"
+                "2. Erstelle eine udev-Regel für USB-Zugriff ohne root:<br>"
+                f"<code>sudo tee /etc/udev/rules.d/99-thermaltake.rules << 'EOF'<br>"
+                f"{udev_line}<br>"
+                "EOF</code><br>"
+                "3. Reload udev: <code>sudo udevadm control --reload && sudo udevadm trigger</code><br>"
+                "4. App neu starten.<br><br>"
+                f"<b>Unterstützte Controller:</b> {pid_list}<br><br>"
+                "<b>Tipp:</b> Farbe funktioniert nur im 'Static'-Effekt. "
+                "Andere Effekte (Breathing, Wave etc.) benutzen ihre eigenen Farben.<br><br>"
+                "<b>PWM-Bereich:</b> Werte unter ~20% können Lüfter stoppen lassen.<br><br>"
+                "<b>Automatische Erkennung:</b> Die App probiert alle bekannten PIDs durch "
+                "und zeigt den gefundenen Controller im Header an."
+            )
+
+        def _show_log(self):
+            """Open the live log viewer dialog."""
+            dlg = LogWindow(self)
+            dlg.exec_()
+
+        def _show_diagnose(self):
+            """Open the USB diagnostic dialog."""
+            dlg = DiagnosticDialog(self.controller, self)
+            dlg.exec_()
+
+        def closeEvent(self, event):
+            self.controller.close()
+            event.accept()
+
+else:
+    # Stub classes when PyQt5 is not available
+    RingWidget = ChannelControl = LogWindow = DiagnosticDialog = MainWindow = None  # type: ignore
 
 
 # ─────────────────────────────────────────────
 #  Entry Point
 # ─────────────────────────────────────────────
 def main():
+    # ── System-Check — warnt vor Problemen bevor sie crashen ──
+    _system_check()
+
+    if not HAS_QT:
+        _print_startup_diag("PyQt5 nicht verfügbar — GUI kann nicht starten.\n"
+                            "Installieren: sudo apt install python3-pyqt5")
+        sys.exit(1)
+
     # ── Pre-flight: catch import/startup errors and show them ──
     try:
         app = QApplication(sys.argv)
@@ -1063,9 +1202,6 @@ def main():
     except Exception as e:
         _print_startup_diag(f"Qt-Init fehlgeschlagen: {e}")
         sys.exit(1)
-
-    # ── System-Check — warnt vor Problemen bevor sie crashen ──
-    _system_check()
 
     try:
         window = MainWindow()
@@ -1096,10 +1232,16 @@ def _print_startup_diag(msg: str):
 
 def _system_check():
     """Lightweight pre-startup check — logs problems before the GUI loads."""
-    # hidraw
+    # hidraw (preferred)
     if not HAS_HIDRAW:
-        tt_log("ERROR", "hidraw nicht verfügbar! USB-HID nicht nutzbar.")
-        print("[FEHLER] Kein /dev/hidraw* — prüfe Berechtigungen", file=sys.stderr)
+        tt_log("WARNING", "hidraw nicht verfügbar — ctypes/fcntl fehlt")
+
+    # pyusb (fallback)
+    if not HAS_USB:
+        tt_log("WARNING", "pyusb nicht verfügbar — pip3 install pyusb")
+
+    if not HAS_HIDRAW and not HAS_USB:
+        tt_log("ERROR", "Weder hidraw noch pyusb verfügbar — USB deaktiviert")
 
     # PyQt5 / X11
     if not HAS_QT:
@@ -1130,15 +1272,14 @@ if __name__ == "__main__":
     # Quick headless diagnostic:  python3 tt_riing_plus.py --diag
     if "--diag" in sys.argv:
         print("🔍 Starte USB-Diagnose (headless) ...\n")
-        # Minimaler Controller für Diagnose
+        # Minimaler Controller für Diagnose — keine USB-Verbindung nötig
         _ctl = TTController.__new__(TTController)
-        _ctl.fd = None
-        _ctl.dev_path = None
-        _ctl.ready = False
-        _ctl.test_mode = True
+        _ctl.dev = None; _ctl.cfg = None; _ctl.iface = None
+        _ctl.ready = False; _ctl.test_mode = True
+        _ctl._backend = None
+        _ctl._hidraw_path = None
         _ctl._fan_count = [1] * MAX_CHANNELS
-        _ctl._detected_pid = None
-        _ctl._detected_name = None
+        _ctl._detected_pid = None; _ctl._detected_name = None
         print(_ctl.diagnose())
         sys.exit(0)
 
