@@ -296,10 +296,7 @@ class TTController:
         if self.test_mode:
             return
         tt_log("INFO", "Initializing controller ...")
-        buf = bytearray(REPORT_PAYLOAD)  # 64 bytes, all zero
-        buf[0] = CMD_INIT    # 0xFE
-        buf[1] = SUB_INIT    # 0x33
-        self._send_payload(bytes(buf))
+        self._send_packet(self._build_init_packet())
         time.sleep(0.3)
         try:
             resp = self.dev.read(REPORT_SIZE, timeout=1000)
@@ -308,23 +305,27 @@ class TTController:
             tt_log("DEBUG", f"Init read: {e}")
 
     # ── low-level send/receive ──
-    def _send_payload(self, payload: bytes):
+    def _send_packet(self, packet: bytes):
         """
-        Send a 64-byte payload to the controller.
-        hidapi prepends Report ID 0x00 automatically.
+        Send a 65-byte packet to the controller via hidapi.
+        Byte 0 must be Report ID (0x00 for single-report devices).
+        Bytes 1-64 are the payload.
+        hidapi.write() sends the raw buffer to /dev/hidrawX — no automatic
+        Report ID prepending on Linux/hidraw.
         """
         if self.test_mode or self.dev is None:
             return
         try:
-            # Ensure exactly 64 bytes
-            data = payload[:REPORT_PAYLOAD].ljust(REPORT_PAYLOAD, b'\x00')
-            self.dev.write(data)
-            tt_log("DEBUG", f"hidapi write: {len(data)} bytes")
+            if len(packet) != REPORT_SIZE:
+                tt_log("ERROR", f"Invalid packet size: {len(packet)} (expected {REPORT_SIZE})")
+                return
+            self.dev.write(packet)
+            tt_log("DEBUG", f"hidapi write: {REPORT_SIZE} bytes")
         except Exception as e:
             tt_log("ERROR", f"hidapi write failed: {e}")
 
     def _read_response(self, timeout=1000) -> bytes:
-        """Read response from controller. Returns raw bytes (without Report ID)."""
+        """Read response from controller. Returns raw bytes."""
         if self.test_mode or self.dev is None:
             return b''
         try:
@@ -334,46 +335,52 @@ class TTController:
             tt_log("DEBUG", f"hidapi read: {e}")
             return b''
 
-    # ── packet builders ──
+    # ── packet builders (all return 65 bytes: Report ID + 64 payload) ──
     def _build_init_packet(self) -> bytes:
-        """Build 64-byte init payload."""
-        buf = bytearray(REPORT_PAYLOAD)
-        buf[0] = CMD_INIT   # 0xFE
-        buf[1] = SUB_INIT   # 0x33
+        """Build 65-byte init packet: [0x00, 0xFE, 0x33, 0x00...]"""
+        buf = bytearray(REPORT_SIZE)
+        buf[0] = REPORT_ID    # 0x00
+        buf[1] = CMD_INIT     # 0xFE
+        buf[2] = SUB_INIT     # 0x33
         return bytes(buf)
 
     def _build_rgb_packet(self, port: int, mode: int, speed: int, colors: list) -> bytes:
         """
-        Build 64-byte RGB color payload.
+        Build 65-byte RGB color packet.
         port: 1-indexed channel number
         mode: effect mode (0x00-0x07)
         speed: effect speed (0x00-0x03)
         colors: list of (R, G, B) tuples, up to LEDS_PER_FAN
+        Format: [0x00, 0x32, 0x52, port, mode|speed, GRB...]
         """
-        buf = bytearray(REPORT_PAYLOAD)
-        buf[0] = CMD_RGB                    # 0x32
-        buf[1] = SUB_RGB                     # 0x52
-        buf[2] = port                        # 1-indexed
-        buf[3] = mode | (speed & 0x03)      # mode + speed combined
-        # Fill GRB color data starting at byte 4
+        buf = bytearray(REPORT_SIZE)
+        buf[0] = REPORT_ID                   # 0x00
+        buf[1] = CMD_RGB                     # 0x32
+        buf[2] = SUB_RGB                      # 0x52
+        buf[3] = port                         # 1-indexed
+        buf[4] = mode | (speed & 0x03)       # mode + speed combined
+        # Fill GRB color data starting at byte 5
         for i, (r, g, b) in enumerate(colors[:LEDS_PER_FAN]):
-            idx = 4 + i * 3
-            buf[idx + 0] = g  # G first (GRB order)
-            buf[idx + 1] = r
-            buf[idx + 2] = b
+            idx = 5 + i * 3
+            if idx + 2 < REPORT_SIZE:
+                buf[idx + 0] = g  # G first (GRB order)
+                buf[idx + 1] = r
+                buf[idx + 2] = b
         return bytes(buf)
 
     def _build_fan_packet(self, port: int, percent: int) -> bytes:
         """
-        Build 64-byte fan speed payload.
+        Build 65-byte fan speed packet.
         port: 1-indexed channel number
         percent: 0-100
+        Format: [0x00, 0x33, 0x56, port, pwm, 0x00...]
         """
-        buf = bytearray(REPORT_PAYLOAD)
-        buf[0] = CMD_FAN                     # 0x33
-        buf[1] = SUB_FAN_PWM                 # 0x56
-        buf[2] = port                        # 1-indexed
-        buf[3] = int(percent * 255 / 100)   # PWM 0-255
+        buf = bytearray(REPORT_SIZE)
+        buf[0] = REPORT_ID                   # 0x00
+        buf[1] = CMD_FAN                     # 0x33
+        buf[2] = SUB_FAN_PWM                 # 0x56
+        buf[3] = port                         # 1-indexed
+        buf[4] = int(percent * 255 / 100)    # PWM 0-255
         return bytes(buf)
 
     # ── public API ──
@@ -390,8 +397,8 @@ class TTController:
         self._current_colors[channel] = colors[:LEDS_PER_FAN]
         mode = self._current_mode[channel]
         speed = self._current_speed[channel]
-        payload = self._build_rgb_packet(channel + 1, mode, speed, colors)
-        self._send_payload(payload)
+        packet = self._build_rgb_packet(channel + 1, mode, speed, colors)
+        self._send_packet(packet)
         tt_log("INFO", f"set_color ch={channel} mode={mode} speed={speed} first=({colors[0] if colors else '?'})")
 
     def set_mode(self, channel: int, mode: int, speed: int = SPEED_NORMAL):
@@ -400,16 +407,16 @@ class TTController:
         self._current_speed[channel] = speed & 0x03
         # Re-send current colors with new mode
         colors = self._current_colors[channel]
-        payload = self._build_rgb_packet(channel + 1, mode, self._current_speed[channel], colors)
-        self._send_payload(payload)
+        packet = self._build_rgb_packet(channel + 1, mode, self._current_speed[channel], colors)
+        self._send_packet(packet)
         mode_name = RGB_EFFECTS.get(mode, f"0x{mode:02x}")
         tt_log("INFO", f"set_mode ch={channel} mode={mode_name} speed={speed}")
 
     def set_speed(self, channel: int, percent: int):
         """Set PWM fan speed for one channel (0-100%)."""
         val = max(0, min(100, percent))
-        payload = self._build_fan_packet(channel + 1, val)
-        self._send_payload(payload)
+        packet = self._build_fan_packet(channel + 1, val)
+        self._send_packet(packet)
         tt_log("INFO", f"set_speed ch={channel} percent={val}%")
 
     def apply(self):
