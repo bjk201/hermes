@@ -8,12 +8,16 @@ Features:
   - Bis zu 5 Kanäle (max 5 Lüfter pro Kanal)
   - PWM-Geschwindigkeit 0-100 %
   - RGB-Farben pro Kanal
-  - RGB-Effekte: Static, Breathing, Wave, Ripple, Pulse, Spectrum Cycle
+  - RGB-Effekte: Flow, Spectrum, Ripple, Blink, Pulse, Wave, Per-LED, Full
   - Echtzeit-Vorschau der Ring-LEDs
   - Automatische Controller-Erkennung (5 bekannte PIDs)
 
 Hardware: Thermaltake RGB Controller (USB HID) — VID 0x264a
 Automatisch erkannt: Riing Plus, Riing Trio, Riing Quad, Flo 360, TOUGHRGB
+
+Protokoll-Quelle: OpenRGB ThermaltakeRiingController.cpp/.h
+  https://github.com/CalcProgrammer1/OpenRGB/blob/master/Controllers/
+  ThermaltakeRiingController/ThermaltakeRiingController/
 
 Author: OWL für Bjk201
 License: MIT
@@ -93,6 +97,9 @@ def tt_log(level: str, msg: str):
 # ─────────────────────────────────────────────
 #  Protocol Constants
 # ─────────────────────────────────────────────
+# Quelle: OpenRGB ThermaltakeRiingController.h
+#   ThermaltakeRiingController.cpp
+
 TT_VID = 0x264a
 
 TT_CONTROLLERS = {
@@ -111,6 +118,7 @@ MAX_CHANNELS = 5
 LEDS_PER_FAN = 12
 
 # Report size: 1 byte Report ID + 64 bytes payload = 65 bytes
+# Quelle: OpenRGB ThermaltakeRiingController.cpp — hid_write(dev, usb_buf, 65)
 REPORT_SIZE = 65
 REPORT_PAYLOAD = 64
 REPORT_ID = 0x00
@@ -126,32 +134,40 @@ SUB_RGB     = 0x52  # RGB data sub-command
 SUB_FW      = 0x50  # Firmware version
 SUB_FAN_PWM = 0x56  # Fan PWM speed
 
-# ── Effect modes (byte 4: mode | speed) ──────────
-MODE_STATIC   = 0x00
-MODE_BREATH   = 0x01
-MODE_WAVE     = 0x02
-MODE_RIPPLE   = 0x03
-MODE_PULSE    = 0x04
-MODE_SPECTRUM = 0x05
-MODE_RAINBOW  = 0x06
-MODE_REACTIVE = 0x07
+# ── Effect modes ──────────────────────────────────
+# Quelle: OpenRGB ThermaltakeRiingController.h — THERMALTAKE_MODE_*
+# WICHTIG: Diese Werte sind NICHT 0x00-0x07!
+# Die Mode-Werte sind: 0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x19
+MODE_FLOW     = 0x00  # Flow (rainbow)
+MODE_SPECTRUM = 0x04  # Spectrum Cycle
+MODE_RIPPLE   = 0x08  # Ripple
+MODE_BLINK    = 0x0C  # Blink
+MODE_PULSE    = 0x10  # Pulse
+MODE_WAVE     = 0x14  # Wave
+MODE_PER_LED  = 0x18  # Per-LED (Direct)
+MODE_FULL     = 0x19  # Full (Static single color)
 
-# Speed is lower 2 bits of byte 4
-SPEED_EXTREME = 0x00
-SPEED_FAST    = 0x01
-SPEED_NORMAL  = 0x02
+# ── Effect speeds ─────────────────────────────────
+# Quelle: OpenRGB ThermaltakeRiingController.h — THERMALTAKE_SPEED_*
 SPEED_SLOW    = 0x03
+SPEED_NORMAL  = 0x02
+SPEED_FAST    = 0x01
+SPEED_EXTREME = 0x00
 
+# Mode name mapping for GUI
 RGB_EFFECTS = {
-    MODE_STATIC:   "Static",
-    MODE_BREATH:   "Breathing",
-    MODE_WAVE:     "Wave",
+    MODE_FLOW:     "Flow",
+    MODE_SPECTRUM: "Spectrum",
     MODE_RIPPLE:   "Ripple",
+    MODE_BLINK:    "Blink",
     MODE_PULSE:    "Pulse",
-    MODE_SPECTRUM: "Spectrum Cycle",
-    MODE_RAINBOW:  "Rainbow Wave",
-    MODE_REACTIVE: "Reactive",
+    MODE_WAVE:     "Wave",
+    MODE_PER_LED:  "Per-LED",
+    MODE_FULL:     "Static",
 }
+
+# Reverse mapping: name -> mode value
+EFFECT_NAME_TO_MODE = {v: k for k, v in RGB_EFFECTS.items()}
 
 EFFECT_SPEED_MAP = {
     "Extreme": SPEED_EXTREME,
@@ -176,17 +192,25 @@ class TTController:
     Uses hidapi library. Protocol based on OpenRGB ThermaltakeRiingController.
 
     Packet format (65 bytes, sent via hid_device.write):
-      Byte 0:    Report ID (0x00) — prepended by hidapi
+      Byte 0:    Report ID (0x00) — MUST be first byte, hidapi does NOT prepend it
       Byte 1:    Command
       Byte 2:    Sub-command
       Byte 3:    Port (1-indexed)
-      Byte 4:    Mode | Speed
+      Byte 4:    Mode + Speed (addition, NOT bit-OR!)
       Byte 5-40: GRB color data (12 LEDs * 3 bytes)
 
-    Internal state per channel:
-      _current_mode[ch]   — effect mode (0x00-0x07)
-      _current_speed[ch]  — effect speed (0x00-0x03)
-      _current_colors[ch] — list of (R,G,B) tuples
+    Quelle: OpenRGB ThermaltakeRiingController.cpp
+      SendInit():  buf[0]=0x00, buf[1]=0xFE, buf[2]=0x33
+      SendRGB():   buf[0]=0x00, buf[1]=0x32, buf[2]=0x52, buf[3]=port,
+                   buf[4]=mode + (speed & 0x03), buf[5:]=GRB
+      hid_write(dev, buf, 65) — always 65 bytes
+
+    HIDAPI write() behavior (libusb/hidapi hid_write()):
+      The first byte of the buffer MUST be the Report ID (0x00 for single-report
+      devices). hidapi does NOT prepend the Report ID automatically.
+      Quelle: hidapi documentation — "The first byte of data[] must contain the
+      report ID. For devices which only contain a single report, this must be
+      set to 0x00. The remaining bytes contain the report data."
     """
 
     def __init__(self, test_mode=False):
@@ -198,7 +222,7 @@ class TTController:
         self._detected_name = None
         self._detected_path = None
         # Per-channel state
-        self._current_mode = [MODE_STATIC] * MAX_CHANNELS
+        self._current_mode = [MODE_FULL] * MAX_CHANNELS
         self._current_speed = [SPEED_NORMAL] * MAX_CHANNELS
         self._current_colors = [[(255, 100, 0)] * LEDS_PER_FAN for _ in range(MAX_CHANNELS)]
         if not test_mode:
@@ -292,7 +316,13 @@ class TTController:
         return True
 
     def _init_controller(self):
-        """Send initialization packet."""
+        """
+        Send initialization packet.
+        Quelle: OpenRGB ThermaltakeRiingController.cpp — SendInit():
+          buf[0]=0x00, buf[1]=0xFE, buf[2]=0x33, rest zeros
+          hid_write(dev, buf, 65)
+          hid_read_timeout(dev, buf, 65, 100)
+        """
         if self.test_mode:
             return
         tt_log("INFO", "Initializing controller ...")
@@ -308,10 +338,14 @@ class TTController:
     def _send_packet(self, packet: bytes):
         """
         Send a 65-byte packet to the controller via hidapi.
+
         Byte 0 must be Report ID (0x00 for single-report devices).
         Bytes 1-64 are the payload.
-        hidapi.write() sends the raw buffer to /dev/hidrawX — no automatic
-        Report ID prepending on Linux/hidraw.
+
+        Quelle: hidapi documentation — hid_write() sends the raw buffer.
+        The first byte MUST be the Report ID. hidapi does NOT prepend it.
+        On Linux/hidraw, this means byte 0 = 0x00 is passed directly to
+        /dev/hidrawX as the report ID.
         """
         if self.test_mode or self.dev is None:
             return
@@ -320,7 +354,7 @@ class TTController:
                 tt_log("ERROR", f"Invalid packet size: {len(packet)} (expected {REPORT_SIZE})")
                 return
             self.dev.write(packet)
-            tt_log("DEBUG", f"hidapi write: {REPORT_SIZE} bytes")
+            tt_log("DEBUG", f"hidapi write: {REPORT_SIZE} bytes — {packet[:8].hex()}")
         except Exception as e:
             tt_log("ERROR", f"hidapi write failed: {e}")
 
@@ -337,7 +371,11 @@ class TTController:
 
     # ── packet builders (all return 65 bytes: Report ID + 64 payload) ──
     def _build_init_packet(self) -> bytes:
-        """Build 65-byte init packet: [0x00, 0xFE, 0x33, 0x00...]"""
+        """
+        Build 65-byte init packet.
+        Quelle: OpenRGB SendInit():
+          buf[0x00] = 0x00;  buf[0x01] = 0xFE;  buf[0x02] = 0x33;
+        """
         buf = bytearray(REPORT_SIZE)
         buf[0] = REPORT_ID    # 0x00
         buf[1] = CMD_INIT     # 0xFE
@@ -347,19 +385,29 @@ class TTController:
     def _build_rgb_packet(self, port: int, mode: int, speed: int, colors: list) -> bytes:
         """
         Build 65-byte RGB color packet.
+
+        Quelle: OpenRGB SendRGB():
+          buf[0x00] = 0x00;
+          buf[0x01] = 0x32;
+          buf[0x02] = 0x52;
+          buf[0x03] = port;               // 1-indexed
+          buf[0x04] = mode + (speed & 0x03);  // Addition, NOT bit-OR!
+          memcpy(&buf[0x05], color_data, num_colors * 3);  // GRB order
+
         port: 1-indexed channel number
-        mode: effect mode (0x00-0x07)
-        speed: effect speed (0x00-0x03)
+        mode: effect mode (MODE_* constants: 0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x19)
+        speed: effect speed (SPEED_* constants: 0x00-0x03)
         colors: list of (R, G, B) tuples, up to LEDS_PER_FAN
-        Format: [0x00, 0x32, 0x52, port, mode|speed, GRB...]
         """
         buf = bytearray(REPORT_SIZE)
         buf[0] = REPORT_ID                   # 0x00
         buf[1] = CMD_RGB                     # 0x32
         buf[2] = SUB_RGB                      # 0x52
         buf[3] = port                         # 1-indexed
-        buf[4] = mode | (speed & 0x03)       # mode + speed combined
+        # Quelle: OpenRGB — mode + (speed & 0x03), NICHT mode | (speed & 0x03)
+        buf[4] = mode + (speed & 0x03)
         # Fill GRB color data starting at byte 5
+        # Quelle: OpenRGB — color_data[color_idx+0]=G, [+1]=R, [+2]=B
         for i, (r, g, b) in enumerate(colors[:LEDS_PER_FAN]):
             idx = 5 + i * 3
             if idx + 2 < REPORT_SIZE:
@@ -371,9 +419,12 @@ class TTController:
     def _build_fan_packet(self, port: int, percent: int) -> bytes:
         """
         Build 65-byte fan speed packet.
-        port: 1-indexed channel number
-        percent: 0-100
         Format: [0x00, 0x33, 0x56, port, pwm, 0x00...]
+
+        HINWEIS: OpenRGB hat KEINE Fan-Speed-Implementierung für diesen Controller.
+        Die Lüftergeschwindigkeit wird über den PWM-Pin des Mainboards gesteuert,
+        nicht über USB. Diese Funktion ist ein Best-Effort-Versuch basierend auf
+        der deklarierten aber nicht implementierten SendFan()-Methode.
         """
         buf = bytearray(REPORT_SIZE)
         buf[0] = REPORT_ID                   # 0x00
@@ -399,21 +450,27 @@ class TTController:
         speed = self._current_speed[channel]
         packet = self._build_rgb_packet(channel + 1, mode, speed, colors)
         self._send_packet(packet)
-        tt_log("INFO", f"set_color ch={channel} mode={mode} speed={speed} first=({colors[0] if colors else '?'})")
+        tt_log("INFO", f"set_color ch={channel} mode={mode:#04x} speed={speed} first=({colors[0] if colors else '?'})")
 
     def set_mode(self, channel: int, mode: int, speed: int = SPEED_NORMAL):
-        """Set lighting effect mode and speed for a channel. Does NOT change colors."""
+        """
+        Set lighting effect mode and speed for a channel. Does NOT change colors.
+        Re-sends current colors with new mode.
+        """
         self._current_mode[channel] = mode
         self._current_speed[channel] = speed & 0x03
-        # Re-send current colors with new mode
         colors = self._current_colors[channel]
         packet = self._build_rgb_packet(channel + 1, mode, self._current_speed[channel], colors)
         self._send_packet(packet)
         mode_name = RGB_EFFECTS.get(mode, f"0x{mode:02x}")
-        tt_log("INFO", f"set_mode ch={channel} mode={mode_name} speed={speed}")
+        tt_log("INFO", f"set_mode ch={channel} mode={mode_name}({mode:#04x}) speed={speed}")
 
     def set_speed(self, channel: int, percent: int):
-        """Set PWM fan speed for one channel (0-100%)."""
+        """
+        Set PWM fan speed for one channel (0-100%).
+        NOTE: OpenRGB has no fan speed implementation for this controller.
+        This is a best-effort attempt.
+        """
         val = max(0, min(100, percent))
         packet = self._build_fan_packet(channel + 1, val)
         self._send_packet(packet)
@@ -499,7 +556,7 @@ if HAS_QT:
             layout = QVBoxLayout(self)
             layout.setSpacing(8)
 
-            # Ring preview
+            # ── Ring preview
             preview_box = QHBoxLayout()
             preview_box.addWidget(QLabel(f"CH{self.ch + 1}:"))
             self.ring = RingWidget(LEDS_PER_FAN)
@@ -509,7 +566,7 @@ if HAS_QT:
             preview_box.addStretch()
             layout.addLayout(preview_box)
 
-            # Fan Speed
+            # ── Fan Speed ──
             speed_group = QGroupBox("Lüftergeschwindigkeit (PWM)")
             sl = QHBoxLayout()
             self.speed_slider = QSlider(Qt.Horizontal)
@@ -525,7 +582,7 @@ if HAS_QT:
             speed_group.setLayout(sl)
             layout.addWidget(speed_group)
 
-            # Speed presets
+            # Speed preset buttons
             preset_row = QHBoxLayout()
             for name, val in FAN_SPEED_PRESETS.items():
                 btn = QPushButton(name)
@@ -533,17 +590,23 @@ if HAS_QT:
                 preset_row.addWidget(btn)
             layout.addLayout(preset_row)
 
-            # RGB Effect
+            # ── RGB Effect ──
             effect_group = QGroupBox("RGB-Effekt")
             ef = QVBoxLayout()
+
             effect_top = QHBoxLayout()
             effect_top.addWidget(QLabel("Modus:"))
             self.effect_combo = QComboBox()
-            self.effect_combo.addItems(list(RGB_EFFECTS.values()))
+            # Use OpenRGB mode names in correct order
+            effect_names = [RGB_EFFECTS[m] for m in [MODE_FLOW, MODE_SPECTRUM, MODE_RIPPLE,
+                                                      MODE_BLINK, MODE_PULSE, MODE_WAVE,
+                                                      MODE_PER_LED, MODE_FULL]]
+            self.effect_combo.addItems(effect_names)
             self.effect_combo.currentTextChanged.connect(self._on_effect_changed)
             effect_top.addWidget(self.effect_combo)
             effect_top.addStretch()
             ef.addLayout(effect_top)
+
             effect_bot = QHBoxLayout()
             effect_bot.addWidget(QLabel("Geschwindigkeit:"))
             self.efx_speed_combo = QComboBox()
@@ -551,10 +614,11 @@ if HAS_QT:
             effect_bot.addWidget(self.efx_speed_combo)
             effect_bot.addStretch()
             ef.addLayout(effect_bot)
+
             effect_group.setLayout(ef)
             layout.addWidget(effect_group)
 
-            # Color Picker
+            # ── Color Picker ──
             color_group = QGroupBox("Farbe (funktioniert nur bei Static)")
             cl = QHBoxLayout()
             self.color_btn = QPushButton("Farbe wählen…")
@@ -569,7 +633,7 @@ if HAS_QT:
             color_group.setLayout(cl)
             layout.addWidget(color_group)
 
-            # Apply
+            # ── Apply ──
             apply_btn = QPushButton("⚠️ Auf Kanal anwenden")
             apply_btn.setStyleSheet(
                 "QPushButton { background-color: #e67e22; color: white; font-weight: bold;"
@@ -578,17 +642,19 @@ if HAS_QT:
             )
             apply_btn.clicked.connect(self._apply)
             layout.addWidget(apply_btn)
+
             layout.addStretch()
 
+        # ── slots ──
         def _on_speed_changed(self, val):
             self.speed_label.setText(f"{val}%")
 
-        def _on_effect_changed(self, effect_name):
+        def _on_effect_changed(self, effect_name: str):
             is_static = effect_name == "Static"
             self.color_btn.setEnabled(is_static)
             self.color_preview.setEnabled(is_static)
 
-        def _set_preset(self, value, name):
+        def _set_preset(self, value: int, name: str):
             self.speed_slider.setValue(value)
 
         def _pick_color(self):
@@ -602,16 +668,24 @@ if HAS_QT:
                 self.ring.set_colors(colors)
 
         def _apply(self):
+            """Send all settings for this channel to the controller."""
             if self.ctl.test_mode:
                 QMessageBox.information(self, "Demo-Modus",
-                    "USB-Gerät nicht gefunden — Einstellungen würden gesendet werden.")
+                    "USB-Gerät nicht gefunden — Einstellungen würden gesendet werden.\n"
+                    "Füge udev-Regel hinzu & stecke Controller ein.")
                 return
+
             try:
+                # Speed
                 self.ctl.set_speed(self.ch, self.speed_slider.value())
+
+                # Effect mode — map combo text to mode constant
                 eff_name = self.effect_combo.currentText()
-                mode_key = [k for k, v in RGB_EFFECTS.items() if v == eff_name][0]
+                mode_key = EFFECT_NAME_TO_MODE.get(eff_name, MODE_FULL)
                 efx_spd = EFFECT_SPEED_MAP.get(self.efx_speed_combo.currentText(), SPEED_NORMAL)
                 self.ctl.set_mode(self.ch, mode_key, efx_spd)
+
+                # Color (only meaningful for Static)
                 if eff_name == "Static":
                     c = self.current_color
                     colors = [(c.red(), c.green(), c.blue())] * LEDS_PER_FAN
@@ -631,32 +705,42 @@ if HAS_QT:
                 QDialog { background: #1e1e1e; }
                 QTextEdit { background: #0d0d0d; color: #aaa; font-family: monospace; font-size: 12px; border: none; }
             """)
+
             lay = QVBoxLayout(self)
+
+            # Controls
             ctrl = QHBoxLayout()
             clear_btn = QPushButton("🗑 Leeren")
             clear_btn.clicked.connect(self._clear)
             ctrl.addWidget(clear_btn)
+
             save_btn = QPushButton("💾 Speichern")
             save_btn.clicked.connect(self._save_log)
             ctrl.addWidget(save_btn)
+
             self.level_filter = QComboBox()
             self.level_filter.addItems(["Alle", "INFO", "WARNING", "ERROR", "DEBUG"])
             self.level_filter.currentTextChanged.connect(self._refilter)
             ctrl.addWidget(QLabel("Filter:"))
             ctrl.addWidget(self.level_filter)
+
             ctrl.addStretch()
             close_btn = QPushButton("✕ Schließen")
             close_btn.clicked.connect(self.close)
             ctrl.addWidget(close_btn)
             lay.addLayout(ctrl)
+
+            # Log text
             self.log_text = QPlainTextEdit()
             self.log_text.setReadOnly(True)
             self.log_text.setLineWrapMode(QPlainTextEdit.NoWrap)
             self.log_text.setMaximumBlockCount(2000)
             lay.addWidget(self.log_text)
+
+            # Poll log queue via QTimer (thread-safe — runs on GUI thread)
             self._log_timer = QTimer(self)
             self._log_timer.timeout.connect(self._poll_log_queue)
-            self._log_timer.start(200)
+            self._log_timer.start(200)  # ms
 
         def _poll_log_queue(self):
             """Drain the log queue — called on GUI thread via QTimer."""
@@ -665,7 +749,12 @@ if HAS_QT:
                     level, msg = _log_queue.get_nowait()
                 except queue.Empty:
                     break
-                colors = {"DEBUG": "#888", "INFO": "#aaa", "WARNING": "#f39c12", "ERROR": "#e74c3c"}
+                colors = {
+                    "DEBUG":    "#888",
+                    "INFO":     "#aaa",
+                    "WARNING":  "#f39c12",
+                    "ERROR":    "#e74c3c",
+                }
                 color = colors.get(level, "#aaa")
                 import datetime
                 ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -687,7 +776,7 @@ if HAS_QT:
         def _refilter(self):
             level = self.level_filter.currentText()
             self.log_text.clear()
-            if not os.path.exists(LOG_FILE):
+            if not LOG_FILE or not os.path.exists(LOG_FILE):
                 return
             colors = {"DEBUG": "#888", "INFO": "#aaa", "WARNING": "#f39c12", "ERROR": "#e74c3c"}
             with open(LOG_FILE) as f:
@@ -714,7 +803,7 @@ if HAS_QT:
 
 
     class DiagnosticDialog(QDialog):
-        """Shows output of controller.diagnose()."""
+        """Shows output of controller.diagnose() for USB troubleshooting."""
 
         def __init__(self, controller: TTController, parent=None):
             super().__init__(parent)
@@ -726,29 +815,38 @@ if HAS_QT:
                 QTextEdit { background: #0d0d0d; color: #2ecc71; font-family: monospace; font-size: 11px; }
                 QPushButton { background: #3a3a3a; padding: 6px 12px; border-radius: 4px; }
             """)
+
             lay = QVBoxLayout(self)
-            info = QLabel("USB-Hilfsdiagnose — zeigt alle gefundenen USB-Geräte.")
+
+            info = QLabel(
+                "USB-Hilfsdiagnose — zeigt alle gefundenen HID-Geräte."
+            )
             info.setWordWrap(True)
             lay.addWidget(info)
+
             self.output = QPlainTextEdit()
             self.output.setReadOnly(True)
             lay.addWidget(self.output)
+
             btn_row = QHBoxLayout()
             run_btn = QPushButton("🔄 Neu scannen")
             run_btn.clicked.connect(self._run)
             btn_row.addWidget(run_btn)
+
             save_btn = QPushButton("💾 Als Datei speichern")
             save_btn.clicked.connect(self._save)
             btn_row.addWidget(save_btn)
+
             btn_row.addStretch()
             close_btn = QPushButton("✕ Schließen")
             close_btn.clicked.connect(self.close)
             btn_row.addWidget(close_btn)
             lay.addLayout(btn_row)
+
             self._run()
 
         def _run(self):
-            self.output.setPlainText("Scanne USB-Bus ...\n")
+            self.output.setPlainText("Scanne HID-Geräte ...\n")
             QApplication.processEvents()
             def _do():
                 result = self.controller.diagnose()
@@ -768,10 +866,12 @@ if HAS_QT:
         def __init__(self):
             super().__init__()
             self.controller = TTController(test_mode=False)
+
             if self.controller.test_mode:
                 self.statusBar().showMessage("⚠️ Kein USB-Gerät gefunden — Demo-Modus aktiv")
             else:
                 self.statusBar().showMessage("✅ Thermaltake Riing Plus verbunden")
+
             self._setup_ui()
 
         def _setup_ui(self):
@@ -780,7 +880,10 @@ if HAS_QT:
             self.setStyleSheet("""
                 QMainWindow { background: #2b2b2b; }
                 QWidget   { color: #e0e0e0; font-size: 13px; }
-                QGroupBox { border: 1px solid #555; border-radius: 6px; margin-top: 8px; font-weight: bold; padding: 12px 8px; }
+                QGroupBox {
+                    border: 1px solid #555; border-radius: 6px; margin-top: 8px;
+                    font-weight: bold; padding: 12px 8px;
+                }
                 QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
                 QPushButton { background: #3a3a3a; border: 1px solid #555; padding: 6px 12px; border-radius: 4px; }
                 QPushButton:hover { background: #4a4a4a; }
@@ -790,17 +893,19 @@ if HAS_QT:
                 QLabel  { color: #ccc; }
                 QStatusBar { background: #1a1a1a; color: #aaa; }
             """)
+
             central = QWidget()
             self.setCentralWidget(central)
             main_layout = QVBoxLayout(central)
 
-            # Header
+            # ── Header ──
             header = QHBoxLayout()
             title = QLabel("🌈 Thermaltake Riing Plus — Linux Fan & RGB Control")
             title.setFont(QFont("Sans", 18, QFont.Bold))
             title.setStyleSheet("color: #e67e22;")
             header.addWidget(title)
             header.addStretch()
+
             if self.controller.test_mode:
                 usb_text = "🔌 USB: NICHT VERBUNDEN"
                 usb_color = "#e74c3c"
@@ -814,7 +919,7 @@ if HAS_QT:
             header.addWidget(self.usb_status)
             main_layout.addLayout(header)
 
-            # Channel Tabs
+            # ── Channel Tabs ──
             self.tabs = QTabWidget()
             self.tab_widgets = []
             for ch in range(MAX_CHANNELS):
@@ -823,54 +928,68 @@ if HAS_QT:
                 self.tabs.addTab(nc, f"  CH {ch + 1}  ")
             main_layout.addWidget(self.tabs)
 
-            # Global Actions
+            # ── Global Actions ──
             global_group = QGroupBox("Globale Aktionen")
             gl = QHBoxLayout()
+
             self.all_apply = QPushButton("✅ Alle anwenden")
             self.all_apply.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
             self.all_apply.clicked.connect(self._apply_all)
             gl.addWidget(self.all_apply)
+
             self.all_off = QPushButton("⏻ Alles AUS")
             self.all_off.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
             self.all_off.clicked.connect(self._all_off)
             gl.addWidget(self.all_off)
+
             self.help_btn = QPushButton("❓ Hilfe")
             self.help_btn.clicked.connect(self._show_help)
             gl.addWidget(self.help_btn)
+
             self.log_btn = QPushButton("📋 Log")
             self.log_btn.clicked.connect(self._show_log)
             gl.addWidget(self.log_btn)
+
             self.diag_btn = QPushButton("🔍 Diagnose")
             self.diag_btn.clicked.connect(self._show_diagnose)
             gl.addWidget(self.diag_btn)
+
             gl.addStretch()
             global_group.setLayout(gl)
             main_layout.addWidget(global_group)
 
         def _apply_all(self):
+            """Apply settings for all channels at once."""
             for w in self.tab_widgets:
                 w._apply()
 
         def _all_off(self):
             if self.controller.test_mode:
-                QMessageBox.information(self, "Demo-Modus", "USB-Gerät nicht verbunden — nichts zu tun.")
+                QMessageBox.information(self, "Demo-Modus",
+                    "USB-Gerät nicht verbunden — nichts zu tun.")
                 return
             self.controller.all_off()
             self.statusBar().showMessage("Alle Lüfter & LEDs ausgeschaltet", 3000)
 
         def _show_help(self):
             pid_list = ", ".join(f"<code>{p:#06x}</code>" for p in TT_CONTROLLERS)
+            udev_line = (
+                'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="264a", MODE="0666"'
+            )
             QMessageBox.information(self, "Hilfe — Thermaltake RGB Control",
                 "<b>Erstmalige Nutzung:</b><br>"
                 "1. Stecke den Thermaltake Controller per USB ein<br>"
-                "2. Erstelle eine udev-Regel:<br>"
-                "<code>sudo tee /etc/udev/rules.d/99-thermaltake.rules << 'EOF'<br>"
-                'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="264a", MODE="0666"<br>'
+                "2. Erstelle eine udev-Regel für HID-Zugriff ohne root:<br>"
+                f"<code>sudo tee /etc/udev/rules.d/99-thermaltake.rules << 'EOF'<br>"
+                f"{udev_line}<br>"
                 "EOF</code><br>"
                 "3. Reload udev: <code>sudo udevadm control --reload && sudo udevadm trigger</code><br>"
                 "4. App neu starten.<br><br>"
                 f"<b>Unterstützte Controller:</b> {pid_list}<br><br>"
-                "<b>Tipp:</b> Farbe funktioniert nur im 'Static'-Effekt."
+                "<b>Tipp:</b> Farbe funktioniert nur im 'Static'-Effekt. "
+                "Andere Effekte (Flow, Spectrum etc.) benutzen ihre eigenen Farben.<br><br>"
+                "<b>Hinweis:</b> PWM-Lüftersteuerung ist experimentell — "
+                "OpenRGB unterstützt sie nicht offiziell."
             )
 
         def _show_log(self):
@@ -890,11 +1009,6 @@ if HAS_QT:
 #  Entry Point
 # ─────────────────────────────────────────────
 def main():
-    _system_check()
-    if not HAS_QT:
-        _print_startup_diag("PyQt5 nicht verfügbar — GUI kann nicht starten.\n"
-                            "Installieren: sudo apt install python3-pyqt5")
-        sys.exit(1)
     try:
         app = QApplication(sys.argv)
         app.setApplicationName("Thermaltake Riing Plus Control")
@@ -902,6 +1016,9 @@ def main():
     except Exception as e:
         _print_startup_diag(f"Qt-Init fehlgeschlagen: {e}")
         sys.exit(1)
+
+    _system_check()
+
     try:
         window = MainWindow()
         window.show()
@@ -911,11 +1028,15 @@ def main():
         tt_log("ERROR", f"Startup crash: {e}\n{tb}")
         try:
             QMessageBox.critical(None, "Startup Error",
-                f"App konnte nicht starten:\n\n{e}\n\nLog: {LOG_FILE or '(kein Log)'}")
+                f"App konnte nicht starten:\n\n{e}\n\n"
+                f"Log: {LOG_FILE or '(kein Log)'}\n\n"
+                f"Diagnose starten mit: python3 {__file__} --diag")
         except Exception:
             _print_startup_diag(tb)
         sys.exit(1)
+
     sys.exit(app.exec_())
+
 
 def _print_startup_diag(msg: str):
     print(f"\n{'='*50}", file=sys.stderr)
@@ -923,27 +1044,39 @@ def _print_startup_diag(msg: str):
     print(f"{'='*50}\n", file=sys.stderr)
     print(msg, file=sys.stderr)
 
+
 def _system_check():
     if not HAS_HIDAPI:
-        tt_log("ERROR", "hidapi nicht verfügbar — pip3 install hidapi")
+        tt_log("ERROR", "hidapi fehlt! USB nicht verfügbar.")
+        print("[FEHLER] hidapi nicht installiert: pip3 install hidapi", file=sys.stderr)
+
     if not HAS_QT:
         tt_log("ERROR", "PyQt5 fehlt! GUI nicht verfügbar.")
+        print("[FEHLER] PyQt5 nicht installiert: sudo apt install python3-pyqt5", file=sys.stderr)
+
     display = os.environ.get("DISPLAY", "")
     wayland = os.environ.get("WAYLAND_DISPLAY", "")
     if not display and not wayland:
         tt_log("WARNING", "Kein DISPLAY/WAYLAND_DISPLAY — GUI vermutlich nicht sichtbar")
+
     try:
         if LOG_FILE:
             os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
             with open(LOG_FILE, "a"):
                 pass
             tt_log("DEBUG", f"Log writable: {LOG_FILE}")
+        else:
+            tt_log("WARNING", "Kein Log-File — File Logging deaktiviert")
     except Exception as e:
         tt_log("WARNING", f"Log nicht beschreibbar: {e}")
 
+
 if __name__ == "__main__":
     if "--diag" in sys.argv:
-        print("🔍 Starte USB-Diagnose (headless) ...\n")
+        print("🔍 Starte HID-Diagnose (headless) ...\n")
+        if not HAS_HIDAPI:
+            print("❌ hidapi fehlt: pip3 install hidapi\n")
+            sys.exit(1)
         _ctl = TTController.__new__(TTController)
         _ctl.dev = None
         _ctl.ready = False
@@ -951,10 +1084,7 @@ if __name__ == "__main__":
         _ctl._fan_count = [1] * MAX_CHANNELS
         _ctl._detected_pid = None
         _ctl._detected_name = None
-        _ctl._detected_path = None
-        _ctl._current_mode = [MODE_STATIC] * MAX_CHANNELS
-        _ctl._current_speed = [SPEED_NORMAL] * MAX_CHANNELS
-        _ctl._current_colors = [[(255, 100, 0)] * LEDS_PER_FAN for _ in range(MAX_CHANNELS)]
         print(_ctl.diagnose())
         sys.exit(0)
+
     main()
