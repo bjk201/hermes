@@ -41,23 +41,13 @@ try:
 except ImportError:
     HAS_USB = False
 
-# hidraw support — used to identify the correct /dev/hidraw* device
-# The Thermaltake controller is a USB HID device. We use hidraw only for
-# device identification; actual communication is via pyusb (libusb) which
-# can detach the kernel HID driver and claim the USB interface directly.
+# hidraw support via hidapi library
+# The Thermaltake controller needs HID SET_REPORT/GET_REPORT which hidapi handles correctly
 HAS_HIDRAW = False
 try:
-    import fcntl
-    import ctypes
-    class HidrawDevinfo(ctypes.Structure):
-        _fields_ = [
-            ("bustype", ctypes.c_int32),
-            ("vendor",  ctypes.c_int16),
-            ("product", ctypes.c_int16),
-        ]
-    _HIDIOCGRAWINFO = 0x80084803
+    import hid
     HAS_HIDRAW = True
-except Exception:
+except ImportError:
     pass
 
 try:
@@ -216,137 +206,79 @@ def build_packet(cmd: int, channel: int, payload: bytes) -> bytes:
 class TTController:
     """
     Low-level USB communication with the Thermaltake Riing Plus controller.
-    Uses hidraw (/dev/hidraw*) as the sole backend.
+    Uses hidapi library for HID SET_REPORT/GET_REPORT via /dev/hidraw*.
     """
 
     def __init__(self, test_mode=False):
-        self.dev = None       # hidraw file descriptor (int)
+        self.dev = None       # hidapi device object
         self.ready = False
         self.test_mode = test_mode
         self._fan_count = [1] * MAX_CHANNELS
         self._detected_pid = None
         self._detected_name = None
-        self._hidraw_path = None
 
         if not test_mode:
             self.connect()
 
-    # ── hidraw helpers ──
-    @staticmethod
-    def _hidraw_get_info(path: str):
-        """Get (VID, PID) from a hidraw device via ioctl HIDIOCGRAWINFO."""
-        if not HAS_HIDRAW:
-            return None, None
-        try:
-            fd = os.open(path, os.O_RDWR | os.O_CLOEXEC)
-            info = HidrawDevinfo()
-            fcntl.ioctl(fd, _HIDIOCGRAWINFO, info)
-            os.close(fd)
-            return info.vendor, info.product
-        except Exception:
-            return None, None
-
+    # ── device discovery via hidapi ──
     @staticmethod
     def _find_hidraw_controller():
         """
-        Scan /dev/hidraw* for a Thermaltake controller.
+        Scan for Thermaltake controller using hidapi enumeration.
         Returns (path, pid, name) or (None, None, None).
         """
         if not HAS_HIDRAW:
             return None, None, None
         try:
-            hidraw_devs = sorted([
-                os.path.join("/dev", n)
-                for n in os.listdir("/dev")
-                if n.startswith("hidraw")
-            ])
+            for device_info in hid.enumerate():
+                vid = device_info.get('vendor_id')
+                pid = device_info.get('product_id')
+                if vid == TT_VID and pid in TT_CONTROLLERS:
+                    path = device_info.get('path')
+                    return path, pid, TT_CONTROLLERS[pid]
+            # Second pass: any TT device
+            for device_info in hid.enumerate():
+                vid = device_info.get('vendor_id')
+                if vid == TT_VID:
+                    pid = device_info.get('product_id')
+                    path = device_info.get('path')
+                    return path, pid, f"Unknown TT (PID {pid:#06x})"
         except Exception:
-            return None, None, None
-
-        for path in hidraw_devs:
-            vid, pid = TTController._hidraw_get_info(path)
-            if vid == TT_VID and pid in TT_CONTROLLERS:
-                return path, pid, TT_CONTROLLERS[pid]
-
-        # Second pass: any device with matching VID (even unknown PID)
-        for path in hidraw_devs:
-            vid, pid = TTController._hidraw_get_info(path)
-            if vid == TT_VID:
-                return path, pid, f"Unknown TT (PID {pid:#06x})"
-
+            pass
         return None, None, None
 
     # ── USB Diagnostic ──
     def diagnose(self) -> str:
         """
-        Umfassende HID-Diagnose — prüft hidraw, Berechtigungen.
+        Umfassende HID-Diagnose — prüft hidapi, Berechtigungen.
         """
         lines = []
         lines.append("=" * 50)
         lines.append("  USB DIAGNOSE (HID)")
         lines.append("=" * 50)
 
-        # 1. hidraw verfügbar?
-        lines.append(f"\n[1] hidraw: {'OK' if HAS_HIDRAW else 'FEHLEND'}")
+        # 1. hidapi verfügbar?
+        lines.append(f"\n[1] hidapi: {'OK' if HAS_HIDRAW else 'FEHLEND'}")
         if not HAS_HIDRAW:
-            lines.append("    → ctypes/fcntl nicht verfügbar")
+            lines.append("    → pip3 install hidapi")
 
-        # 2. Suche nach bekannten Controllers via hidraw
-        lines.append(f"\n[2] Suche nach bekannten Controllers (VID={TT_VID:#06x}):")
+        # 2. Controller suchen
+        lines.append(f"\n[2] Controller-Suche (VID={TT_VID:#06x}):")
         found_any = False
         if HAS_HIDRAW:
             try:
-                hidraw_devs = sorted([
-                    os.path.join("/dev", n)
-                    for n in os.listdir("/dev")
-                    if n.startswith("hidraw")
-                ])
-                for path in hidraw_devs:
-                    vid, pid = self._hidraw_get_info(path)
+                for device_info in hid.enumerate():
+                    vid = device_info.get('vendor_id')
+                    pid = device_info.get('product_id')
                     if vid == TT_VID:
                         name = TT_CONTROLLERS.get(pid, f"Unknown (PID {pid:#06x})")
-                        lines.append(f"    ✅ {path}: {name} (PID {pid:#06x})")
+                        lines.append(f"    ✅ {name} (PID {pid:#06x})")
                         found_any = True
             except Exception as e:
-                lines.append(f"    hidraw scan error: {e}")
+                lines.append(f"    Fehler: {e}")
 
         if not found_any:
             lines.append("    — Keine gefunden")
-
-        # 3. Alle /dev/hidraw* Geräte
-        lines.append("\n[3] Alle /dev/hidraw* Geräte:")
-        try:
-            hidraw_devs = sorted([
-                os.path.join("/dev", n)
-                for n in os.listdir("/dev")
-                if n.startswith("hidraw")
-            ])
-            for path in hidraw_devs:
-                vid, pid = (None, None)
-                if HAS_HIDRAW:
-                    vid, pid = self._hidraw_get_info(path)
-                if vid is not None:
-                    lines.append(f"    {path}: VID={vid:#06x} PID={pid:#06x}")
-                else:
-                    lines.append(f"    {path}: ?")
-        except Exception as e:
-            lines.append(f"    Fehler: {e}")
-
-        # 4. Berechtigungen
-        lines.append("\n[4] Berechtigungen:")
-        try:
-            hidraw_devs = sorted([
-                os.path.join("/dev", n)
-                for n in os.listdir("/dev")
-                if n.startswith("hidraw")
-            ])
-            for path in hidraw_devs:
-                readable = os.access(path, os.R_OK)
-                writable = os.access(path, os.W_OK)
-                lines.append(f"    {path}: {'lesbar' if readable else 'NICHT lesbar'} / "
-                           f"{'schreibbar' if writable else 'NICHT schreibbar'}")
-        except Exception as e:
-            lines.append(f"    Fehler: {e}")
 
         lines.append("\n" + "=" * 50)
         return "\n".join(lines)
@@ -354,30 +286,30 @@ class TTController:
     # ── device plumbing ──
     def _find_device(self):
         """
-        Automatische Erkennung via hidraw (/dev/hidraw*).
-        Gibt (device_path, pid, name) oder (None, None, None) zurück.
+        Automatische Erkennung via hidapi.
+        Gibt (path_bytes, pid, name) oder (None, None, None) zurück.
         """
         if HAS_HIDRAW:
             path, pid, name = self._find_hidraw_controller()
             if path is not None:
-                tt_log("INFO", f"Found controller via hidraw: {name} (PID {pid:#06x}) at {path}")
+                tt_log("INFO", f"Found controller: {name} (PID {pid:#06x})")
                 return path, pid, name
 
-        tt_log("WARNING", "No Thermaltake controller found on hidraw")
+        tt_log("WARNING", "No Thermaltake controller found")
         return None, None, None
 
     def connect(self) -> bool:
         if not HAS_HIDRAW:
-            tt_log("ERROR", "hidraw nicht verfügbar — USB disabled")
+            tt_log("ERROR", "hidapi nicht verfügbar — USB disabled")
             self.test_mode = True
             return False
 
         result = self._find_device()
-        self._hidraw_path = result[0]
+        path = result[0]
         detected_pid = result[1]
         detected_name = result[2]
 
-        if self._hidraw_path is None:
+        if path is None:
             tt_log("ERROR", "Controller not found — entering test mode")
             self.test_mode = True
             return False
@@ -387,12 +319,12 @@ class TTController:
 
         tt_log("INFO", f"Detected: {detected_name} (PID {detected_pid:#06x})")
 
-        # Open hidraw device
+        # Open device via hidapi
         try:
-            self.dev = os.open(self._hidraw_path, os.O_RDWR | os.O_CLOEXEC)
-            tt_log("INFO", f"hidraw device opened: {self._hidraw_path} (fd={self.dev})")
-        except OSError as e:
-            tt_log("ERROR", f"Cannot open hidraw device: {e}")
+            self.dev = hid.Device(path=path)
+            tt_log("INFO", f"hidapi device opened: {self.dev.manufacturer} {self.dev.product}")
+        except Exception as e:
+            tt_log("ERROR", f"Cannot open device via hidapi: {e}")
             self.test_mode = True
             return False
 
@@ -410,11 +342,8 @@ class TTController:
         self._send_raw(b'\x29\x02' + b'\x00' * 62)
         time.sleep(0.3)
         try:
-            resp = self._hidraw_read(65, timeout=1000)
-            # Strip report ID byte (first byte)
-            if len(resp) == 65:
-                resp = resp[1:]
-            tt_log("DEBUG", f"Init response: {len(resp)} bytes — {resp[:32].hex()}")
+            resp = self.dev.read(64, timeout=1000)
+            tt_log("DEBUG", f"Init response: {len(resp)} bytes — {bytes(resp)[:32].hex()}")
             if len(resp) >= 33:
                 self._fan_count = [min(max(resp[16 + i], 1), 5) for i in range(MAX_CHANNELS)]
                 tt_log("INFO", f"Fan counts per channel: {self._fan_count}")
@@ -428,47 +357,22 @@ class TTController:
         if self.test_mode or self.dev is None:
             return
         try:
-            # HID report: 1 byte report ID (0x00) + 64 bytes data = 65 bytes total
-            hid_report = b'\x00' + raw
-            # Use HIDIOCSFEATURE ioctl for SET_REPORT
-            # The ioctl expects a pointer to a buffer with the report data
-            import array
-            buf = array.array('B', hid_report)
-            # HIDIOCSFEATURE(len) = _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x06, len)
-            # len=65 (0x41): (3<<30) | (65<<16) | (0x48<<8) | 0x06 = 0xC0414806
-            fcntl.ioctl(self.dev, 0xC0414806, buf)
-            tt_log("DEBUG", f"HIDIOCSFEATURE sent: {len(buf)} bytes")
+            # hidapi send_feature_report: report_id + data
+            # The Thermaltake controller expects 64-byte reports
+            self.dev.write(raw)
+            tt_log("DEBUG", f"hidapi write: {len(raw)} bytes")
         except Exception as e:
-            tt_log("ERROR", f"HIDIOCSFEATURE failed: {e}")
+            tt_log("ERROR", f"hidapi write failed: {e}")
 
     def _read_resp(self, timeout=1000) -> bytes:
         if self.test_mode or self.dev is None:
             return b''
         try:
-            return self._hidraw_read(65, timeout=timeout)
+            resp = self.dev.read(64, timeout=timeout)
+            tt_log("DEBUG", f"hidapi read: {len(resp)} bytes")
+            return bytes(resp)
         except Exception as e:
-            tt_log("WARNING", f"hidraw read failed: {e}")
-            return b''
-
-    def _hidraw_read(self, size: int, timeout: int = 1000) -> bytes:
-        """Read from hidraw device using HIDIOCGFEATURE ioctl."""
-        import array
-        import select
-        fd = self.dev
-        ready, _, _ = select.select([fd], [], [], timeout / 1000.0)
-        if not ready:
-            return b''
-        # HIDIOCGFEATURE: _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x07, size)
-        buf = array.array('B', b'\x00' * size)
-        try:
-            fcntl.ioctl(fd, 0xC0414807, buf)  # HIDIOCGFEATURE(65)
-            data = bytes(buf)
-            tt_log("DEBUG", f"HIDIOCGFEATURE read: {len(data)} bytes")
-            if len(data) == 65:
-                return data[1:]
-            return data
-        except Exception as e:
-            tt_log("WARNING", f"HIDIOCGFEATURE failed: {e}")
+            tt_log("WARNING", f"hidapi read failed: {e}")
             return b''
 
     # ── public API ──
@@ -522,7 +426,7 @@ class TTController:
         if self.test_mode or self.dev is None:
             return
         try:
-            os.close(self.dev)
+            self.dev.close()
         except Exception:
             pass
 
@@ -1127,7 +1031,7 @@ def _print_startup_diag(msg: str):
 def _system_check():
     """Lightweight pre-startup check — logs problems before the GUI loads."""
     if not HAS_HIDRAW:
-        tt_log("ERROR", "hidraw nicht verfügbar — ctypes/fcntl fehlt")
+        tt_log("ERROR", "hidapi nicht verfügbar — pip3 install hidapi")
 
     # PyQt5 / X11
     if not HAS_QT:
