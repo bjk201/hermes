@@ -430,12 +430,14 @@ class TTController:
         try:
             # HID report: 1 byte report ID (0x00) + 64 bytes data = 65 bytes total
             hid_report = b'\x00' + raw
-            # Use HIDIOCSFEATURE ioctl for SET_REPORT — required for Thermaltake controllers
-            # _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x06, len) = 0xC0084806 for SET_FEATURE
-            import ctypes
-            buf = ctypes.create_string_buffer(hid_report)
-            ret = fcntl.ioctl(self.dev, 0xC0084806, buf)  # HIDIOCSFEATURE
-            tt_log("DEBUG", f"HIDIOCSFEATURE sent: {ret}")
+            # Use HIDIOCSFEATURE ioctl for SET_REPORT
+            # The ioctl expects a pointer to a buffer with the report data
+            import array
+            buf = array.array('B', hid_report)
+            # HIDIOCSFEATURE(len) = _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x06, len)
+            # len=65 (0x41): (3<<30) | (65<<16) | (0x48<<8) | 0x06 = 0xC0414806
+            fcntl.ioctl(self.dev, 0xC0414806, buf)
+            tt_log("DEBUG", f"HIDIOCSFEATURE sent: {len(buf)} bytes")
         except Exception as e:
             tt_log("ERROR", f"HIDIOCSFEATURE failed: {e}")
 
@@ -450,20 +452,18 @@ class TTController:
 
     def _hidraw_read(self, size: int, timeout: int = 1000) -> bytes:
         """Read from hidraw device using HIDIOCGFEATURE ioctl."""
-        import ctypes
+        import array
         import select
         fd = self.dev
-        # Use select for timeout
         ready, _, _ = select.select([fd], [], [], timeout / 1000.0)
         if not ready:
             return b''
-        # HIDIOCGFEATURE: _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x07, len) = 0xC0084807
-        buf = ctypes.create_string_buffer(size)
+        # HIDIOCGFEATURE: _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x07, size)
+        buf = array.array('B', b'\x00' * size)
         try:
-            fcntl.ioctl(fd, 0xC0084807, buf)  # HIDIOCGFEATURE
-            data = buf.raw[:size]
+            fcntl.ioctl(fd, 0xC0414807, buf)  # HIDIOCGFEATURE(65)
+            data = bytes(buf)
             tt_log("DEBUG", f"HIDIOCGFEATURE read: {len(data)} bytes")
-            # Strip report ID (first byte) and return 64 bytes
             if len(data) == 65:
                 return data[1:]
             return data
