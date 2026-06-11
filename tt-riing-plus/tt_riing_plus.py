@@ -177,7 +177,7 @@ EFFECT_SPEED_MAP = {
 }
 
 FAN_SPEED_PRESETS = {
-    "Silent":      25,
+    "Silent":      20,
     "Normal":      50,
     "Performance": 75,
     "Full":        100,
@@ -303,8 +303,10 @@ class TTController:
         tt_log("INFO", f"Found controller: {name} (PID {pid:#06x})")
 
         try:
-            self.dev = hid.Device(path=path)
-            tt_log("INFO", f"Device opened: {self.dev.manufacturer} {self.dev.product}")
+            dev = hid.device()
+            dev.open_path(path)
+            self.dev = dev
+            tt_log("INFO", f"Device opened: {self.dev.get_manufacturer_string()} {self.dev.get_product_string()}")
         except Exception as e:
             tt_log("ERROR", f"Cannot open device: {e}")
             self.test_mode = True
@@ -419,19 +421,22 @@ class TTController:
     def _build_fan_packet(self, port: int, percent: int) -> bytes:
         """
         Build 65-byte fan speed packet.
-        Format: [0x00, 0x33, 0x56, port, pwm, 0x00...]
+        Format: [0x00, 0x32, 0x51, port, 0x01, speed, 0x00...]
 
-        HINWEIS: OpenRGB hat KEINE Fan-Speed-Implementierung für diesen Controller.
-        Die Lüftergeschwindigkeit wird über den PWM-Pin des Mainboards gesteuert,
-        nicht über USB. Diese Funktion ist ein Best-Effort-Versuch basierend auf
-        der deklarierten aber nicht implementierten SendFan()-Methode.
+        Quelle: chestm007/linux_thermaltake_riing devices/__init__.py:
+          ThermaltakeFanDevice.set_fan_speed():
+            data = [PROTOCOL_SET, PROTOCOL_FAN, self.port, 0x01, int(speed)]
+            # PROTOCOL_SET=0x32, PROTOCOL_FAN=0x51
+
+        Speed: 0-100 (percentage, NOT 0-255 PWM)
         """
         buf = bytearray(REPORT_SIZE)
         buf[0] = REPORT_ID                   # 0x00
-        buf[1] = CMD_FAN                     # 0x33
-        buf[2] = SUB_FAN_PWM                 # 0x56
+        buf[1] = CMD_RGB                     # 0x32 (PROTOCOL_SET)
+        buf[2] = 0x51                        # PROTOCOL_FAN
         buf[3] = port                         # 1-indexed
-        buf[4] = int(percent * 255 / 100)    # PWM 0-255
+        buf[4] = 0x01                        # fixed
+        buf[5] = min(100, max(0, percent))   # speed 0-100
         return bytes(buf)
 
     # ── public API ──
@@ -465,15 +470,29 @@ class TTController:
         mode_name = RGB_EFFECTS.get(mode, f"0x{mode:02x}")
         tt_log("INFO", f"set_mode ch={channel} mode={mode_name}({mode:#04x}) speed={speed}")
 
+    def _commit_fan(self):
+        """
+        Send save_profile commit after fan speed change.
+        Quelle: chestm007/linux_thermaltake_riing drivers.py:
+          save_profile(): write_out([0x32, 0x53])
+        """
+        buf = bytearray(REPORT_SIZE)
+        buf[0] = REPORT_ID   # 0x00
+        buf[1] = CMD_RGB     # 0x32
+        buf[2] = 0x53        # save_profile sub-command
+        self._send_packet(bytes(buf))
+
     def set_speed(self, channel: int, percent: int):
         """
         Set PWM fan speed for one channel (0-100%).
-        NOTE: OpenRGB has no fan speed implementation for this controller.
-        This is a best-effort attempt.
+        Quelle: chestm007/linux_thermaltake_riing devices/__init__.py:
+          ThermaltakeFanDevice.set_fan_speed():
+            data = [PROTOCOL_SET, PROTOCOL_FAN, self.port, 0x01, int(speed)]
         """
         val = max(0, min(100, percent))
         packet = self._build_fan_packet(channel + 1, val)
         self._send_packet(packet)
+        self._commit_fan()
         tt_log("INFO", f"set_speed ch={channel} percent={val}%")
 
     def apply(self):
