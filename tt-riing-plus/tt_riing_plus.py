@@ -32,6 +32,8 @@ import threading
 import logging
 import queue
 from functools import partial
+import json as _json_mod
+import collections as _coll_mod
 
 # ─────────────────────────────────────────────
 #  Backend imports
@@ -93,6 +95,20 @@ def tt_log(level: str, msg: str):
     """Thread-safe log — writes to file and pushes to queue for GUI polling."""
     getattr(_logger, level.lower(), _logger.info)(msg)
     _log_queue.put((level.upper(), msg))
+
+# ─────────────────────────────────────────────
+#  Feature Imports (Profile, Auto, Graph)
+# ─────────────────────────────────────────────
+try:
+    from tt_features import (
+        ProfileManager, AutoMode, HistoryBuffer, HistoryPoint,
+        FAN_CURVE, FAN_MIN, AUTO_UPDATE_MS,
+        HAS_PSUTIL, HAS_PYQTGRAPH,
+        DEFAULT_PROFILES, PROFILE_FILE,
+    )
+    HAS_FEATURES = True
+except ImportError:
+    HAS_FEATURES = False
 
 # ─────────────────────────────────────────────
 #  Protocol Constants
@@ -879,6 +895,95 @@ if HAS_QT:
                     f.write(self.output.toPlainText())
 
 
+    # ── Graph Widget (pyqtgraph) ─────────────────────
+    if HAS_PYQTGRAPH:
+        class GraphWidget(QWidget):
+            """Live graph: temperature + fan speed over last hour."""
+
+            def __init__(self, history, auto_mode, controller, tt_log, parent=None):
+                super().__init__(parent)
+                self.history = history
+                self.auto_mode = auto_mode
+                self.controller = controller
+                self.tt_log = tt_log
+                self._setup_ui()
+                # Update graph every 3s
+                self._timer = QTimer(self)
+                self._timer.timeout.connect(self._update)
+                self._timer.start(3000)
+
+            def _setup_ui(self):
+                layout = QVBoxLayout(self)
+
+                # Info bar
+                info = QHBoxLayout()
+                self.temp_label = QLabel("Temp: --°C")
+                self.fan_label = QLabel("Fan: --%")
+                self.sensor_label = QLabel("Sensor: --")
+                info.addWidget(self.temp_label)
+                info.addWidget(self.fan_label)
+                info.addWidget(self.sensor_label)
+                info.addStretch()
+                layout.addLayout(info)
+
+                # Plot
+                self.plot_widget = PlotWidget()
+                self.plot_widget.setBackground('#1e1e1e')
+                self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
+                self.plot_widget.setLabel('left', 'Value')
+                self.plot_widget.setLabel('bottom', 'Time')
+                self.plot_widget.addLegend()
+
+                # Temperature curve (red)
+                self.temp_curve = self.plot_widget.plot(
+                    pen=pg.mkPen(color='#e74c3c', width=2),
+                    name='Temperatur (°C)'
+                )
+                # Fan speed curve (blue)
+                self.fan_curve = self.plot_widget.plot(
+                    pen=pg.mkPen(color='#3498db', width=2),
+                    name='Lüfter (%)'
+                )
+
+                # Axis: show time as HH:MM
+                axis = pg.DateAxisItem(orientation='bottom')
+                self.plot_widget.setAxisItems({'bottom': axis})
+
+                layout.addWidget(self.plot_widget)
+
+                # Curve info
+                curve_info = QLabel(
+                    f"Fan-Kurve: ≤{FAN_CURVE[0][0]}°C→{FAN_CURVE[0][1]}% … "
+                    f"≥{FAN_CURVE[-1][0]}°C→{FAN_CURVE[-1][1]}% | Min: {FAN_MIN}%"
+                )
+                curve_info.setStyleSheet("color: #888; font-size: 11px;")
+                layout.addWidget(curve_info)
+
+            def _update(self):
+                """Update graph with latest history data."""
+                if not self.history:
+                    return
+                t_ts, t_val, f_ts, f_val = self.history.get_data()
+                if not t_ts:
+                    return
+
+                # Convert timestamps to seconds ago for display
+                now = time.time()
+                t_x = [ts - now for ts in t_ts]
+                f_x = [ts - now for ts in f_ts]
+
+                self.temp_curve.setData(t_x, t_val)
+                self.fan_curve.setData(f_x, f_val)
+
+                # Update labels
+                if t_val:
+                    self.temp_label.setText(f"Temp: {t_val[-1]:.1f}°C")
+                if f_val:
+                    self.fan_label.setText(f"Fan: {f_val[-1]:.0f}%")
+                if self.auto_mode and self.auto_mode.current_sensor:
+                    self.sensor_label.setText(f"Sensor: {self.auto_mode.current_sensor}")
+
+
     class MainWindow(QMainWindow):
         """Thermaltake Riing Plus — Linux Control Centre."""
 
@@ -890,6 +995,11 @@ if HAS_QT:
                 self.statusBar().showMessage("⚠️ Kein USB-Gerät gefunden — Demo-Modus aktiv")
             else:
                 self.statusBar().showMessage("✅ Thermaltake Riing Plus verbunden")
+
+            # ── Feature instances ──
+            self.profile_mgr = ProfileManager() if HAS_FEATURES else None
+            self.auto_mode = AutoMode(self.controller, tt_log) if HAS_FEATURES else None
+            self.history = HistoryBuffer() if HAS_FEATURES else None
 
             self._setup_ui()
 
@@ -938,13 +1048,30 @@ if HAS_QT:
             header.addWidget(self.usb_status)
             main_layout.addLayout(header)
 
-            # ── Channel Tabs ──
+            # ── Channel Tabs + Graph Tab ──
             self.tabs = QTabWidget()
             self.tab_widgets = []
             for ch in range(MAX_CHANNELS):
                 nc = ChannelControl(ch, self.controller.num_fans[ch], self.controller)
                 self.tab_widgets.append(nc)
                 self.tabs.addTab(nc, f"  CH {ch + 1}  ")
+
+            # Graph tab (if pyqtgraph available)
+            if HAS_FEATURES and HAS_PYQTGRAPH:
+                self.graph_widget = GraphWidget(self.history, self.auto_mode, self.controller, tt_log)
+                self.tabs.addTab(self.graph_widget, "  📈 Graph  ")
+            elif HAS_FEATURES:
+                # No pyqtgraph — show placeholder
+                graph_placeholder = QWidget()
+                gl = QVBoxLayout(graph_placeholder)
+                gl.addWidget(QLabel("📈 Live-Graph"))
+                gl.addWidget(QLabel("pyqtgraph nicht installiert — pip3 install pyqtgraph"))
+                gl.addStretch()
+                self.tabs.addTab(graph_placeholder, "  📈 Graph  ")
+                self.graph_widget = None
+            else:
+                self.graph_widget = None
+
             main_layout.addWidget(self.tabs)
 
             # ── Global Actions ──
@@ -961,6 +1088,37 @@ if HAS_QT:
             self.all_off.clicked.connect(self._all_off)
             gl.addWidget(self.all_off)
 
+            # ── Profile buttons ──
+            if HAS_FEATURES and self.profile_mgr:
+                gl.addWidget(QLabel("  |  "))
+                self.profile_combo = QComboBox()
+                self.profile_combo.addItems(self.profile_mgr.list_profiles())
+                self.profile_combo.setMinimumWidth(120)
+                gl.addWidget(QLabel("Profil:"))
+                gl.addWidget(self.profile_combo)
+
+                load_btn = QPushButton("📂 Laden")
+                load_btn.clicked.connect(self._load_profile)
+                gl.addWidget(load_btn)
+
+                save_btn = QPushButton("💾 Speichern")
+                save_btn.clicked.connect(self._save_profile)
+                gl.addWidget(save_btn)
+
+            # ── Auto mode toggle ──
+            if HAS_FEATURES and self.auto_mode and self.auto_mode.available_sensors:
+                gl.addWidget(QLabel("  |  "))
+                self.auto_cb = QCheckBox("Auto-Modus")
+                self.auto_cb.stateChanged.connect(self._toggle_auto_mode)
+                gl.addWidget(self.auto_cb)
+
+                self.auto_sensor_combo = QComboBox()
+                self.auto_sensor_combo.addItems(self.auto_mode.available_sensors)
+                if self.auto_mode.current_sensor:
+                    self.auto_sensor_combo.setCurrentText(self.auto_mode.current_sensor)
+                self.auto_sensor_combo.currentTextChanged.connect(self._change_auto_sensor)
+                gl.addWidget(self.auto_sensor_combo)
+
             self.help_btn = QPushButton("❓ Hilfe")
             self.help_btn.clicked.connect(self._show_help)
             gl.addWidget(self.help_btn)
@@ -976,6 +1134,17 @@ if HAS_QT:
             gl.addStretch()
             global_group.setLayout(gl)
             main_layout.addWidget(global_group)
+
+            # ── Auto-mode & History timer ──
+            if HAS_FEATURES and self.auto_mode:
+                self._auto_timer = QTimer(self)
+                self._auto_timer.timeout.connect(self._auto_tick)
+                # Don't start timer here — only when auto mode is enabled
+
+            if HAS_FEATURES and self.history:
+                self._history_timer = QTimer(self)
+                self._history_timer.timeout.connect(self._history_tick)
+                self._history_timer.start(3000)  # 3s interval
 
         def _apply_all(self):
             """Apply settings for all channels at once."""
@@ -1019,7 +1188,99 @@ if HAS_QT:
             dlg = DiagnosticDialog(self.controller, self)
             dlg.exec_()
 
+        # ── Profile slots ──
+        def _load_profile(self):
+            name = self.profile_combo.currentText()
+            if not name or not self.profile_mgr:
+                return
+            applied = self.profile_mgr.apply_profile(name, self.controller, tt_log)
+            if applied:
+                self.statusBar().showMessage(f"Profil '{name}' angewendet ({len(applied)} Kanäle)", 5000)
+                # Update GUI sliders to reflect loaded profile
+                profile = self.profile_mgr.get_profile(name)
+                if profile:
+                    for ch_str, data in profile.get("channels", {}).items():
+                        ch = int(ch_str)
+                        if ch < len(self.tab_widgets):
+                            w = self.tab_widgets[ch]
+                            w.speed_slider.setValue(data.get("fan_speed", 50))
+            else:
+                self.statusBar().showMessage(f"Profil '{name}' konnte nicht angewendet werden", 5000)
+
+        def _save_profile(self):
+            name = self.profile_combo.currentText()
+            if not name or not self.profile_mgr:
+                return
+            # Collect current state from all channel widgets
+            channels_data = {}
+            for ch, w in enumerate(self.tab_widgets):
+                eff_name = w.effect_combo.currentText()
+                mode_key = EFFECT_NAME_TO_MODE.get(eff_name, MODE_FULL)
+                efx_spd = EFFECT_SPEED_MAP.get(w.efx_speed_combo.currentText(), SPEED_NORMAL)
+                c = w.current_color
+                channels_data[str(ch)] = {
+                    "fan_speed": w.speed_slider.value(),
+                    "mode": mode_key,
+                    "speed": efx_spd,
+                    "color": [c.red(), c.green(), c.blue()],
+                }
+            self.profile_mgr.save_profile(name, channels_data)
+            self.statusBar().showMessage(f"Profil '{name}' gespeichert", 5000)
+
+        # ── Auto mode slots ──
+        def _toggle_auto_mode(self, state):
+            if not self.auto_mode:
+                return
+            if state == Qt.Checked:
+                if self.auto_mode.start():
+                    self._auto_timer.start(AUTO_UPDATE_MS)
+                    # Disable manual sliders
+                    for w in self.tab_widgets:
+                        w.speed_slider.setEnabled(False)
+                else:
+                    self.auto_cb.setChecked(False)
+            else:
+                self.auto_mode.stop()
+                self._auto_timer.stop()
+                for w in self.tab_widgets:
+                    w.speed_slider.setEnabled(True)
+
+        def _change_auto_sensor(self, sensor_name):
+            if self.auto_mode:
+                self.auto_mode.set_sensor(sensor_name)
+
+        def _auto_tick(self):
+            """Called by QTimer — runs on GUI thread."""
+            if self.auto_mode:
+                result = self.auto_mode.tick()
+                if result:
+                    # Update history
+                    if self.history:
+                        fan_spd = result.get("fan_speed")
+                        temp = result.get("temp")
+                        self.history.add(temp, fan_spd)
+
+        def _history_tick(self):
+            """Called every 3s — records current temp even without auto mode."""
+            if not self.history:
+                return
+            # If auto mode is active, _auto_tick already recorded
+            # If not, record current temp for the graph
+            if self.auto_mode and self.auto_mode.active:
+                return  # Already recorded in _auto_tick
+
+            # Record temperature only (fan speed unknown without auto mode)
+            if self.auto_mode:
+                temp = self.auto_mode.get_temperature()
+                if temp is not None:
+                    self.history.add(temp, 0)
+
         def closeEvent(self, event):
+            # Stop timers
+            if hasattr(self, '_auto_timer'):
+                self._auto_timer.stop()
+            if hasattr(self, '_history_timer'):
+                self._history_timer.stop()
             self.controller.close()
             event.accept()
 
