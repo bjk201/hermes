@@ -292,7 +292,7 @@ class AutoMode:
         # Hysteresis: only send if change is significant
         if (self._last_fan_speed is None or
                 abs(target_speed - self._last_fan_speed) >= FAN_HYSTERESIS):
-            for ch in range(5):
+            for ch in range(self.controller.num_channels):
                 self.controller.set_speed(ch, target_speed)
             self._last_fan_speed = target_speed
             self.tt_log("INFO",
@@ -305,9 +305,15 @@ class AutoMode:
         }
 
     def start(self):
-        """Enable auto mode."""
+        """Enable auto mode. Returns False if psutil or sensors unavailable."""
+        if not HAS_PSUTIL:
+            self.tt_log("WARNING", "Auto-Modus: psutil nicht verfügbar — pip3 install psutil")
+            return False
         if not self._available_sensors:
-            self.tt_log("WARNING", "Auto-Modus: Keine Sensoren — nicht aktivierbar")
+            self.tt_log("WARNING", "Auto-Modus: Keine Temperatursensoren gefunden — nicht aktivierbar")
+            return False
+        if not self._sensor_name:
+            self.tt_log("WARNING", "Auto-Modus: Kein Sensor ausgewählt — nicht aktivierbar")
             return False
         self.active = True
         self._last_fan_speed = None

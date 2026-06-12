@@ -27,6 +27,7 @@ fi
 echo "  Installiere PyQt5..."
 "$VENV_DIR/bin/pip" install -q --upgrade pip 2>&1 | tail -1
 "$VENV_DIR/bin/pip" install -q PyQt5 2>&1 | tail -2
+"$VENV_DIR/bin/pip" install -q hidapi psutil 2>&1 | tail -2
 
 # ── 3. Verifikation ──
 echo "[3/3] Verifikation..."

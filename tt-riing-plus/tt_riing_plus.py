@@ -230,13 +230,14 @@ class TTController:
     """
 
     def __init__(self, test_mode=False):
-        self.dev = None
+        self.devs = []        # list of (device, pid, name) — supports multiple controllers
         self.ready = False
         self.test_mode = test_mode
         self._fan_count = [1] * MAX_CHANNELS
         self._detected_pid = None
         self._detected_name = None
         self._detected_path = None
+        self.num_channels = MAX_CHANNELS  # will be updated in connect()
         # Per-channel state
         self._current_mode = [MODE_FULL] * MAX_CHANNELS
         self._current_speed = [SPEED_NORMAL] * MAX_CHANNELS
@@ -246,32 +247,55 @@ class TTController:
 
     # ── device discovery ──
     @staticmethod
-    def _find_controller():
+    def _find_controllers():
         """
-        Scan for Thermaltake controller using hidapi enumeration.
-        Prefers primary PID (0x1fa5). Returns (path_bytes, pid, name) or (None, None, None).
+        Scan for ALL Thermaltake controllers using hidapi enumeration.
+        Returns list of (path_bytes, pid, name) tuples for all matching devices.
+        Priority: primary PID (0x1fa5) first, then secondary (0x1fa6), then others.
         """
         if not HAS_HIDAPI:
-            return None, None, None
+            return []
         try:
             devices = hid.enumerate()
-            # First pass: primary PID
+            results = []
+            # First pass: primary PID (0x1fa5 = RGB controller)
             for d in devices:
-                if d.get('vendor_id') == TT_VID and d.get('product_id') == TT_PID_PRIMARY:
-                    return d['path'], TT_PID_PRIMARY, TT_CONTROLLERS[TT_PID_PRIMARY]
-            # Second pass: any known PID
+                if d.get('vendor_id') == TT_VID and d.get('product_id') == 0x1fa5:
+                    results.append((d['path'], 0x1fa5, TT_CONTROLLERS[0x1fa5]))
+            # Second pass: hub PID (0x1fa6 = Fan/Hub controller)
+            for d in devices:
+                if d.get('vendor_id') == TT_VID and d.get('product_id') == 0x1fa6:
+                    results.append((d['path'], 0x1fa6, TT_CONTROLLERS[0x1fa6]))
+            # Third pass: any other known PID
             for d in devices:
                 pid = d.get('product_id')
-                if d.get('vendor_id') == TT_VID and pid in TT_CONTROLLERS:
-                    return d['path'], pid, TT_CONTROLLERS[pid]
-            # Third pass: any TT device
+                if d.get('vendor_id') == TT_VID and pid in TT_CONTROLLERS and pid not in (0x1fa5, 0x1fa6):
+                    results.append((d['path'], pid, TT_CONTROLLERS[pid]))
+            # Fourth pass: any unknown TT device
             for d in devices:
-                if d.get('vendor_id') == TT_VID:
-                    pid = d.get('product_id')
-                    return d['path'], pid, f"Unknown TT (PID {pid:#06x})"
+                pid = d.get('product_id')
+                if d.get('vendor_id') == TT_VID and pid not in TT_CONTROLLERS:
+                    results.append((d['path'], pid, f"Unknown TT (PID {pid:#06x})"))
+            return results
         except Exception:
             pass
-        return None, None, None
+        return []
+
+    @staticmethod
+    def _count_channels_from_devices(devices):
+        """
+        Determine total number of channels from discovered devices.
+        Each RGB controller (0x1fa5) provides 5 channels.
+        Each Hub (0x1fa6) provides 5 channels.
+        Total = sum of all controller channels.
+        """
+        total = 0
+        for _, pid, _ in devices:
+            if pid in (0x1fa5, 0x1fa6):
+                total += 5
+            else:
+                total += 5  # default for unknown controllers
+        return total if total > 0 else MAX_CHANNELS
 
     # ── diagnostic ──
     def diagnose(self) -> str:
@@ -286,17 +310,29 @@ class TTController:
         found_any = False
         if HAS_HIDAPI:
             try:
-                for d in hid.enumerate():
-                    vid = d.get('vendor_id')
-                    pid = d.get('product_id')
-                    if vid == TT_VID:
-                        name = TT_CONTROLLERS.get(pid, f"Unknown (PID {pid:#06x})")
-                        lines.append(f"    ✅ {name} (PID {pid:#06x})")
-                        found_any = True
+                all_devices = self._find_controllers()
+                for path, pid, name in all_devices:
+                    lines.append(f"    ✅ {name} (PID {pid:#06x})")
+                    found_any = True
+                if not found_any:
+                    # Fallback: show all TT devices
+                    for d in hid.enumerate():
+                        vid = d.get('vendor_id')
+                        pid = d.get('product_id')
+                        if vid == TT_VID:
+                            name = TT_CONTROLLERS.get(pid, f"Unknown (PID {pid:#06x})")
+                            lines.append(f"    ✅ {name} (PID {pid:#06x})")
+                            found_any = True
             except Exception as e:
                 lines.append(f"    Fehler: {e}")
         if not found_any:
             lines.append("    — Keine gefunden")
+        lines.append(f"\n[3] Geöffnete Devices: {len(self.devs)}")
+        for dev, pid, name in self.devs:
+            lines.append(f"    ✅ {name} (PID {pid:#06x})")
+        lines.append(f"[4] Kanäle: {self.num_channels}")
+        if HAS_FEATURES:
+            lines.append(f"[5] psutil: {'OK' if HAS_PSUTIL else 'FEHLEND — pip3 install psutil'}")
         lines.append("\n" + "=" * 50)
         return "\n".join(lines)
 
@@ -307,28 +343,43 @@ class TTController:
             self.test_mode = True
             return False
 
-        path, pid, name = self._find_controller()
-        if path is None:
+        found = self._find_controllers()
+        if not found:
             tt_log("ERROR", "Controller not found — entering test mode")
             self.test_mode = True
             return False
 
-        self._detected_pid = pid
-        self._detected_name = name
-        self._detected_path = path
-        tt_log("INFO", f"Found controller: {name} (PID {pid:#06x})")
+        # Determine total channels from all discovered controllers
+        self.num_channels = self._count_channels_from_devices(found)
+        # Expand per-channel state if needed
+        if self.num_channels > MAX_CHANNELS:
+            extra = self.num_channels - len(self._current_mode)
+            self._current_mode.extend([MODE_FULL] * extra)
+            self._current_speed.extend([SPEED_NORMAL] * extra)
+            self._current_colors.extend([[(255, 100, 0)] * LEDS_PER_FAN for _ in range(extra)])
+            self._fan_count.extend([1] * extra)
 
-        try:
-            dev = hid.device()
-            dev.open_path(path)
-            self.dev = dev
-            tt_log("INFO", f"Device opened: {self.dev.get_manufacturer_string()} {self.dev.get_product_string()}")
-        except Exception as e:
-            tt_log("ERROR", f"Cannot open device: {e}")
+        tt_log("INFO", f"Gefundene Controller: {len(found)} — {self.num_channels} Kanäle")
+
+        # Open all found devices
+        for path, pid, name in found:
+            try:
+                dev = hid.device()
+                dev.open_path(path)
+                self.devs.append((dev, pid, name))
+                tt_log("INFO", f"Device opened: {name} (PID {pid:#06x})")
+            except Exception as e:
+                tt_log("ERROR", f"Cannot open {name} (PID {pid:#06x}): {e}")
+
+        if not self.devs:
+            tt_log("ERROR", "No devices could be opened — entering test mode")
             self.test_mode = True
             return False
 
         self.ready = True
+        self._detected_pid = found[0][1]
+        self._detected_name = found[0][2]
+        self._detected_path = found[0][0]
         self._init_controller()
         tt_log("INFO", "Controller connected and initialized")
         return True
@@ -347,7 +398,7 @@ class TTController:
         self._send_packet(self._build_init_packet())
         time.sleep(0.3)
         try:
-            resp = self.dev.read(REPORT_SIZE, timeout=1000)
+            resp = self.dev.read(REPORT_SIZE, timeout_ms=1000)
             tt_log("DEBUG", f"Init response: {len(resp)} bytes — {bytes(resp)[:16].hex()}")
         except Exception as e:
             tt_log("DEBUG", f"Init read: {e}")
@@ -356,32 +407,30 @@ class TTController:
     def _send_packet(self, packet: bytes):
         """
         Send a 65-byte packet to the controller via hidapi.
-
-        Byte 0 must be Report ID (0x00 for single-report devices).
-        Bytes 1-64 are the payload.
-
-        Quelle: hidapi documentation — hid_write() sends the raw buffer.
-        The first byte MUST be the Report ID. hidapi does NOT prepend it.
-        On Linux/hidraw, this means byte 0 = 0x00 is passed directly to
-        /dev/hidrawX as the report ID.
+        Sends to ALL opened devices (RGB + Hub).
         """
-        if self.test_mode or self.dev is None:
+        if self.test_mode or not self.devs:
             return
         try:
             if len(packet) != REPORT_SIZE:
                 tt_log("ERROR", f"Invalid packet size: {len(packet)} (expected {REPORT_SIZE})")
                 return
-            self.dev.write(packet)
+            for dev, pid, name in self.devs:
+                try:
+                    dev.write(packet)
+                except Exception as e:
+                    tt_log("ERROR", f"hidapi write failed ({name}): {e}")
             tt_log("DEBUG", f"hidapi write: {REPORT_SIZE} bytes — {packet[:8].hex()}")
         except Exception as e:
             tt_log("ERROR", f"hidapi write failed: {e}")
 
-    def _read_response(self, timeout=1000) -> bytes:
-        """Read response from controller. Returns raw bytes."""
-        if self.test_mode or self.dev is None:
+    def _read_response(self, timeout_ms=1000) -> bytes:
+        """Read response from first opened device. Returns raw bytes."""
+        if self.test_mode or not self.devs:
             return b''
         try:
-            resp = self.dev.read(REPORT_SIZE, timeout=timeout)
+            dev = self.devs[0][0]
+            resp = dev.read(REPORT_SIZE, timeout_ms=timeout_ms)
             return bytes(resp)
         except Exception as e:
             tt_log("DEBUG", f"hidapi read: {e}")
@@ -517,17 +566,19 @@ class TTController:
 
     def all_off(self):
         """Turn off all LEDs and stop all fans."""
-        for ch in range(MAX_CHANNELS):
+        for ch in range(self.num_channels):
             self.set_speed(ch, 0)
             black = [(0, 0, 0)] * LEDS_PER_FAN
             self.set_color(ch, black)
 
     def close(self):
-        if self.dev and not self.test_mode:
-            try:
-                self.dev.close()
-            except Exception:
-                pass
+        if self.devs and not self.test_mode:
+            for dev, pid, name in self.devs:
+                try:
+                    dev.close()
+                except Exception:
+                    pass
+        self.devs = []
 
     def __del__(self):
         self.close()
@@ -668,6 +719,22 @@ if HAS_QT:
             color_group.setLayout(cl)
             layout.addWidget(color_group)
 
+            # ── Brightness ──
+            bright_group = QGroupBox("LED-Helligkeit")
+            bl = QHBoxLayout()
+            self.bright_slider = QSlider(Qt.Horizontal)
+            self.bright_slider.setRange(0, 100)
+            self.bright_slider.setValue(100)
+            self.bright_slider.setTickInterval(10)
+            self.bright_slider.setTickPosition(QSlider.TicksBelow)
+            self.bright_slider.valueChanged.connect(self._on_brightness_changed)
+            self.bright_label = QLabel("100%")
+            self.bright_label.setMinimumWidth(40)
+            bl.addWidget(self.bright_slider)
+            bl.addWidget(self.bright_label)
+            bright_group.setLayout(bl)
+            layout.addWidget(bright_group)
+
             # ── Apply ──
             apply_btn = QPushButton("⚠️ Auf Kanal anwenden")
             apply_btn.setStyleSheet(
@@ -691,6 +758,9 @@ if HAS_QT:
 
         def _set_preset(self, value: int, name: str):
             self.speed_slider.setValue(value)
+
+        def _on_brightness_changed(self, val):
+            self.bright_label.setText(f"{val}%")
 
         def _pick_color(self):
             c = QColorDialog.getColor(self.current_color, self, "RGB-Farbe wählen")
@@ -720,10 +790,14 @@ if HAS_QT:
                 efx_spd = EFFECT_SPEED_MAP.get(self.efx_speed_combo.currentText(), SPEED_NORMAL)
                 self.ctl.set_mode(self.ch, mode_key, efx_spd)
 
-                # Color (only meaningful for Static)
+                # Color (only meaningful for Static) with brightness scaling
                 if eff_name == "Static":
                     c = self.current_color
-                    colors = [(c.red(), c.green(), c.blue())] * LEDS_PER_FAN
+                    brightness = self.bright_slider.value() / 100.0
+                    r = int(c.red() * brightness)
+                    g = int(c.green() * brightness)
+                    b = int(c.blue() * brightness)
+                    colors = [(r, g, b)] * LEDS_PER_FAN
                     self.ctl.set_color(self.ch, colors)
             except Exception as e:
                 QMessageBox.warning(self, "Fehler", f"Konnte Befehl nicht senden:\n{e}")
@@ -837,6 +911,22 @@ if HAS_QT:
             event.accept()
 
 
+    class DiagnosticWorker(QThread):
+        """Background worker for HID diagnosis — runs diagnose() off GUI thread."""
+        finished = pyqtSignal(str)
+
+        def __init__(self, controller):
+            super().__init__()
+            self.controller = controller
+
+        def run(self):
+            try:
+                result = self.controller.diagnose()
+            except Exception as e:
+                result = f"Fehler bei Diagnose: {e}"
+            self.finished.emit(result)
+
+
     class DiagnosticDialog(QDialog):
         """Shows output of controller.diagnose() for USB troubleshooting."""
 
@@ -882,11 +972,12 @@ if HAS_QT:
 
         def _run(self):
             self.output.setPlainText("Scanne HID-Geräte ...\n")
-            QApplication.processEvents()
-            def _do():
-                result = self.controller.diagnose()
-                self.output.setPlainText(result)
-            threading.Thread(target=_do, daemon=True).start()
+            self._worker = DiagnosticWorker(self.controller)
+            self._worker.finished.connect(self._on_result)
+            self._worker.start()
+
+        def _on_result(self, result):
+            self.output.setPlainText(result)
 
         def _save(self):
             path, _ = QFileDialog.getSaveFileName(self, "Diagnose speichern", "tt-diagnose.txt", "Text (*.txt)")
@@ -1051,21 +1142,24 @@ if HAS_QT:
             # ── Channel Tabs + Graph Tab ──
             self.tabs = QTabWidget()
             self.tab_widgets = []
-            for ch in range(MAX_CHANNELS):
+            for ch in range(self.controller.num_channels):
                 nc = ChannelControl(ch, self.controller.num_fans[ch], self.controller)
                 self.tab_widgets.append(nc)
                 self.tabs.addTab(nc, f"  CH {ch + 1}  ")
 
-            # Graph tab (if pyqtgraph available)
+            # Graph tab
             if HAS_FEATURES and HAS_PYQTGRAPH:
                 self.graph_widget = GraphWidget(self.history, self.auto_mode, self.controller, tt_log)
                 self.tabs.addTab(self.graph_widget, "  📈 Graph  ")
             elif HAS_FEATURES:
-                # No pyqtgraph — show placeholder
+                # No pyqtgraph — show placeholder with info
                 graph_placeholder = QWidget()
                 gl = QVBoxLayout(graph_placeholder)
                 gl.addWidget(QLabel("📈 Live-Graph"))
                 gl.addWidget(QLabel("pyqtgraph nicht installiert — pip3 install pyqtgraph"))
+                graph_placeholder_graph_label = QLabel("")
+                graph_placeholder_graph_label.setStyleSheet("color: #666; font-size: 11px;")
+                gl.addWidget(graph_placeholder_graph_label)
                 gl.addStretch()
                 self.tabs.addTab(graph_placeholder, "  📈 Graph  ")
                 self.graph_widget = None
@@ -1269,11 +1363,17 @@ if HAS_QT:
             if self.auto_mode and self.auto_mode.active:
                 return  # Already recorded in _auto_tick
 
-            # Record temperature only (fan speed unknown without auto mode)
+            # Read temperature (works even without auto mode)
+            temp = None
             if self.auto_mode:
                 temp = self.auto_mode.get_temperature()
-                if temp is not None:
-                    self.history.add(temp, 0)
+
+            # Get current fan speed from first channel widget (best-effort)
+            fan_speed = 0
+            if self.tab_widgets:
+                fan_speed = self.tab_widgets[0].speed_slider.value()
+
+            self.history.add(temp, fan_speed)
 
         def closeEvent(self, event):
             # Stop timers
@@ -1358,10 +1458,11 @@ if __name__ == "__main__":
             print("❌ hidapi fehlt: pip3 install hidapi\n")
             sys.exit(1)
         _ctl = TTController.__new__(TTController)
-        _ctl.dev = None
+        _ctl.devs = []
         _ctl.ready = False
         _ctl.test_mode = True
         _ctl._fan_count = [1] * MAX_CHANNELS
+        _ctl.num_channels = MAX_CHANNELS
         _ctl._detected_pid = None
         _ctl._detected_name = None
         print(_ctl.diagnose())

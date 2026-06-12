@@ -1,1 +1,3 @@
 PyQt5>=5.15
+hidapi>=0.14
+psutil>=5.9
