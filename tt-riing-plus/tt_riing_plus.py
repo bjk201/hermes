@@ -58,6 +58,14 @@ try:
 except ImportError:
     HAS_QT = False
 
+# ── pyqtgraph (optional, for live graph) ──
+try:
+    import pyqtgraph as pg
+    from pyqtgraph import PlotWidget, PlotDataItem, DateAxisItem
+    HAS_PYQTGRAPH = True
+except ImportError:
+    HAS_PYQTGRAPH = False
+
 # ─────────────────────────────────────────────
 #  Logging
 # ─────────────────────────────────────────────
@@ -1153,16 +1161,12 @@ if HAS_QT:
                 self.graph_widget = GraphWidget(self.history, self.auto_mode, self.controller, tt_log)
                 self.tabs.addTab(self.graph_widget, "  📈 Graph  ")
             elif HAS_FEATURES:
-                # No pyqtgraph — show placeholder with info
-                graph_placeholder = QWidget()
-                gl = QVBoxLayout(graph_placeholder)
-                gl.addWidget(QLabel("📈 Live-Graph"))
-                gl.addWidget(QLabel("pyqtgraph nicht installiert — pip3 install pyqtgraph"))
-                graph_placeholder_graph_label = QLabel("")
-                graph_placeholder_graph_label.setStyleSheet("color: #666; font-size: 11px;")
-                gl.addWidget(graph_placeholder_graph_label)
-                gl.addStretch()
-                self.tabs.addTab(graph_placeholder, "  📈 Graph  ")
+                gp = QWidget()
+                gp_l = QVBoxLayout(gp)
+                gp_l.addWidget(QLabel("📈 Live-Graph"))
+                gp_l.addWidget(QLabel("pyqtgraph nicht installiert — pip3 install pyqtgraph"))
+                gp_l.addStretch()
+                self.tabs.addTab(gp, "  📈 Graph  ")
                 self.graph_widget = None
             else:
                 self.graph_widget = None
@@ -1204,36 +1208,40 @@ if HAS_QT:
             if HAS_FEATURES and self.auto_mode and self.auto_mode.available_sensors:
                 auto_group = QGroupBox("Auto-Modus")
                 auto_layout = QVBoxLayout()
+                auto_layout.setSpacing(2)
+                auto_layout.setContentsMargins(4, 4, 4, 4)
 
-                # Row 1: Checkbox + Sensor dropdown
+                # Row 1: Checkbox + Sensor dropdown (compact)
                 ctrl_row = QHBoxLayout()
                 self.auto_cb = QCheckBox("Auto-Modus")
                 self.auto_cb.stateChanged.connect(self._toggle_auto_mode)
                 ctrl_row.addWidget(self.auto_cb)
-
-                ctrl_row.addWidget(QLabel("  Temperaturquelle:"))
+                ctrl_row.addWidget(QLabel("Quelle:"))
                 self.auto_sensor_combo = QComboBox()
+                self.auto_sensor_combo.setMinimumWidth(180)
                 self._update_sensor_combo()
                 self.auto_sensor_combo.currentTextChanged.connect(self._change_auto_sensor)
                 ctrl_row.addWidget(self.auto_sensor_combo)
                 ctrl_row.addStretch()
                 auto_layout.addLayout(ctrl_row)
 
-                # Row 2: Live sensor readings table
-                sensor_table = QLabel("🌡 Sensoren werden geladen...")
-                sensor_table.setStyleSheet("color: #aaa; font-size: 12px; padding: 4px;")
-                sensor_table.setWordWrap(True)
-                self.sensor_table_label = sensor_table
-                auto_layout.addWidget(sensor_table)
+                # Row 2: Live sensor readings (single line, compact)
+                sensor_label = QLabel("🌡 ...")
+                sensor_label.setStyleSheet("color: #777; font-size: 10px;")
+                sensor_label.setWordWrap(False)
+                sensor_label.setMaximumHeight(16)
+                self.sensor_table_label = sensor_label
+                auto_layout.addWidget(sensor_label)
 
                 auto_group.setLayout(auto_layout)
+                auto_group.setMaximumHeight(72)
                 gl.addWidget(auto_group)
 
                 # Sensor live update timer (every 2s)
                 self._sensor_timer = QTimer(self)
                 self._sensor_timer.timeout.connect(self._update_sensor_display)
                 self._sensor_timer.start(2000)
-                self._update_sensor_display()  # initial update
+                self._update_sensor_display()
 
             self.help_btn = QPushButton("❓ Hilfe")
             self.help_btn.clicked.connect(self._show_help)
