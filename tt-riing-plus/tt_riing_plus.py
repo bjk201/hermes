@@ -1200,19 +1200,40 @@ if HAS_QT:
                 save_btn.clicked.connect(self._save_profile)
                 gl.addWidget(save_btn)
 
-            # ── Auto mode toggle ──
+            # ── Auto mode + Sensor live display ──
             if HAS_FEATURES and self.auto_mode and self.auto_mode.available_sensors:
-                gl.addWidget(QLabel("  |  "))
+                auto_group = QGroupBox("Auto-Modus")
+                auto_layout = QVBoxLayout()
+
+                # Row 1: Checkbox + Sensor dropdown
+                ctrl_row = QHBoxLayout()
                 self.auto_cb = QCheckBox("Auto-Modus")
                 self.auto_cb.stateChanged.connect(self._toggle_auto_mode)
-                gl.addWidget(self.auto_cb)
+                ctrl_row.addWidget(self.auto_cb)
 
+                ctrl_row.addWidget(QLabel("  Temperaturquelle:"))
                 self.auto_sensor_combo = QComboBox()
-                self.auto_sensor_combo.addItems(self.auto_mode.available_sensors)
-                if self.auto_mode.current_sensor:
-                    self.auto_sensor_combo.setCurrentText(self.auto_mode.current_sensor)
+                self._update_sensor_combo()
                 self.auto_sensor_combo.currentTextChanged.connect(self._change_auto_sensor)
-                gl.addWidget(self.auto_sensor_combo)
+                ctrl_row.addWidget(self.auto_sensor_combo)
+                ctrl_row.addStretch()
+                auto_layout.addLayout(ctrl_row)
+
+                # Row 2: Live sensor readings table
+                sensor_table = QLabel("🌡 Sensoren werden geladen...")
+                sensor_table.setStyleSheet("color: #aaa; font-size: 12px; padding: 4px;")
+                sensor_table.setWordWrap(True)
+                self.sensor_table_label = sensor_table
+                auto_layout.addWidget(sensor_table)
+
+                auto_group.setLayout(auto_layout)
+                gl.addWidget(auto_group)
+
+                # Sensor live update timer (every 2s)
+                self._sensor_timer = QTimer(self)
+                self._sensor_timer.timeout.connect(self._update_sensor_display)
+                self._sensor_timer.start(2000)
+                self._update_sensor_display()  # initial update
 
             self.help_btn = QPushButton("❓ Hilfe")
             self.help_btn.clicked.connect(self._show_help)
@@ -1327,6 +1348,8 @@ if HAS_QT:
             if not self.auto_mode:
                 return
             if state == Qt.Checked:
+                # Refresh sensor list before trying to start
+                self._update_sensor_combo()
                 if self.auto_mode.start():
                     self._auto_timer.start(AUTO_UPDATE_MS)
                     # Disable manual sliders
@@ -1343,6 +1366,39 @@ if HAS_QT:
         def _change_auto_sensor(self, sensor_name):
             if self.auto_mode:
                 self.auto_mode.set_sensor(sensor_name)
+
+        def _update_sensor_combo(self):
+            """Refresh the sensor dropdown with current readings."""
+            if not self.auto_mode:
+                return
+            self.auto_sensor_combo.blockSignals(True)
+            self.auto_sensor_combo.clear()
+            readings = self.auto_mode.get_all_sensor_readings()
+            for r in readings:
+                temp_str = f"{r['temp']:.1f}°C" if r['temp'] is not None else "N/A"
+                self.auto_sensor_combo.addItem(f"{r['key']} — {temp_str}", r['key'])
+            # Restore selection if possible
+            if self.auto_mode.current_sensor:
+                idx = self.auto_sensor_combo.findData(self.auto_mode.current_sensor)
+                if idx >= 0:
+                    self.auto_sensor_combo.setCurrentIndex(idx)
+            self.auto_sensor_combo.blockSignals(False)
+
+        def _update_sensor_display(self):
+            """Update the live sensor readings table."""
+            if not self.auto_mode or not self.sensor_table_label:
+                return
+            readings = self.auto_mode.get_all_sensor_readings()
+            if not readings:
+                self.sensor_table_label.setText("🌡 Keine Sensoren verfügbar")
+                return
+            lines = []
+            for r in readings:
+                temp_str = f"{r['temp']:.1f}°C" if r['temp'] is not None else "N/A"
+                label_str = f" ({r['label']})" if r['label'] != r['key'] else ""
+                marker = " ◀" if r['key'] == self.auto_mode.current_sensor else ""
+                lines.append(f"  {r['key']}{label_str}: {temp_str}{marker}")
+            self.sensor_table_label.setText("🌡 Live-Sensoren:\n" + "\n".join(lines))
 
         def _auto_tick(self):
             """Called by QTimer — runs on GUI thread."""
@@ -1382,6 +1438,8 @@ if HAS_QT:
                 self._auto_timer.stop()
             if hasattr(self, '_history_timer'):
                 self._history_timer.stop()
+            if hasattr(self, '_sensor_timer'):
+                self._sensor_timer.stop()
             self.controller.close()
             event.accept()
 

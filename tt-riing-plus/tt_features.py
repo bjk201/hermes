@@ -185,22 +185,14 @@ class AutoMode:
         self._detect_sensors()
 
     def _detect_sensors(self):
-        """Detect available temperature sensors via psutil."""
+        """Detect available temperature sensors via psutil. Does NOT auto-pick one."""
         if not HAS_PSUTIL:
-            self.tt_log("WARNING", "Auto-Modus: psutil nicht verfügbar — pip3 install psutil")
             return
 
         try:
             temps = psutil.sensors_temperatures()
             if not temps:
-                self.tt_log("WARNING", "Auto-Modus: Keine Temperatursensoren gefunden")
                 return
-
-            # Priority order for CPU sensors
-            priority_labels = [
-                "coretemp", "k10temp", "zenpower", "cpu_thermal",
-                "acpitz", "x86_pkg_temp",
-            ]
 
             # Collect all available sensors
             for label, entries in temps.items():
@@ -208,19 +200,7 @@ class AutoMode:
                     key = f"{label}_{entry.label}" if entry.label else label
                     self._available_sensors[key] = (label, entry.label or key)
 
-            # Pick best sensor
-            for priority in priority_labels:
-                for key, (label, entry_label) in self._available_sensors.items():
-                    if priority in label.lower():
-                        self._sensor_name = key
-                        self.tt_log("INFO", f"Auto-Modus: Sensor gewählt — {key} ({label})")
-                        return
-
-            # Fallback: first available
-            if self._available_sensors:
-                first_key = list(self._available_sensors.keys())[0]
-                self._sensor_name = first_key
-                self.tt_log("INFO", f"Auto-Modus: Sensor gewählt (fallback) — {first_key}")
+            self.tt_log("INFO", f"Auto-Modus: {len(self._available_sensors)} Sensoren gefunden")
 
         except Exception as e:
             self.tt_log("WARNING", f"Auto-Modus: Sensor-Erkennung fehlgeschlagen: {e}")
@@ -239,6 +219,30 @@ class AutoMode:
         if sensor_name in self._available_sensors:
             self._sensor_name = sensor_name
             self.tt_log("INFO", f"Auto-Modus: Sensor gewechselt — {sensor_name}")
+
+    def get_all_sensor_readings(self) -> list:
+        """
+        Read ALL temperature sensors and return list of dicts.
+        Each dict: {"key": "k10temp_Tctl", "label": "Tctl", "temp": 45.0}
+        """
+        if not HAS_PSUTIL:
+            return []
+        readings = []
+        try:
+            temps = psutil.sensors_temperatures()
+            for key, (label, entry_label) in self._available_sensors.items():
+                if label in temps:
+                    for entry in temps[label]:
+                        if (entry.label or label) == entry_label:
+                            readings.append({
+                                "key": key,
+                                "label": entry.label or label,
+                                "temp": entry.current,
+                            })
+                            break
+        except Exception:
+            pass
+        return readings
 
     def get_temperature(self) -> float | None:
         """Read current temperature from selected sensor."""
@@ -305,15 +309,12 @@ class AutoMode:
         }
 
     def start(self):
-        """Enable auto mode. Returns False if psutil or sensors unavailable."""
+        """Enable auto mode. Only works if a sensor is explicitly selected."""
         if not HAS_PSUTIL:
             self.tt_log("WARNING", "Auto-Modus: psutil nicht verfügbar — pip3 install psutil")
             return False
-        if not self._available_sensors:
-            self.tt_log("WARNING", "Auto-Modus: Keine Temperatursensoren gefunden — nicht aktivierbar")
-            return False
         if not self._sensor_name:
-            self.tt_log("WARNING", "Auto-Modus: Kein Sensor ausgewählt — nicht aktivierbar")
+            self.tt_log("WARNING", "Auto-Modus: Kein Sensor ausgewählt — bitte Temperaturquelle wählen")
             return False
         self.active = True
         self._last_fan_speed = None
