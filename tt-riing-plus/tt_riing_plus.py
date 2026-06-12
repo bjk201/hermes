@@ -398,7 +398,8 @@ class TTController:
         self._send_packet(self._build_init_packet())
         time.sleep(0.3)
         try:
-            resp = self.dev.read(REPORT_SIZE, timeout_ms=1000)
+            dev = self.devs[0][0]
+            resp = dev.read(REPORT_SIZE, timeout_ms=1000)
             tt_log("DEBUG", f"Init response: {len(resp)} bytes — {bytes(resp)[:16].hex()}")
         except Exception as e:
             tt_log("DEBUG", f"Init read: {e}")
