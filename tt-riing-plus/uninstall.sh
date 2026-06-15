@@ -11,6 +11,8 @@ UDEV_RULE="/etc/udev/rules.d/99-thermaltake.rules"
 CONFIG_DIR="$HOME/.config/tt-riing-plus"
 DESKTOP_FILE="$HOME/.local/share/applications/tt-riing-plus.desktop"
 SYSTEMD_SERVICE="$HOME/.config/systemd/user/tt-riing-plus.service"
+ICON_NAME="tt-riing-plus"
+XDG_ICONS="$HOME/.local/share/icons/hicolor"
 
 echo "🗑  Deinstalliere tt-riing-plus..."
 echo ""
@@ -36,7 +38,26 @@ else
     echo "   — Keine .desktop vorhanden, übersprungen"
 fi
 
-# 2) udev-Regel entfernen
+# 2) Icons entfernen
+echo "📋  Entferne Icons..."
+for size in 16 22 24 32 48 64 128 256; do
+    icon_file="$XDG_ICONS/${size}x${size}/apps/${ICON_NAME}.png"
+    if [ -f "$icon_file" ]; then
+        rm -f "$icon_file"
+        echo "   ✅ icon-${size}x${size}.png entfernt"
+    fi
+done
+svg_file="$XDG_ICONS/scalable/apps/${ICON_NAME}.svg"
+if [ -f "$svg_file" ]; then
+    rm -f "$svg_file"
+    echo "   ✅ icon.svg entfernt"
+fi
+if command -v gtk-update-icon-cache &>/dev/null; then
+    gtk-update-icon-cache -f "$XDG_ICONS" 2>/dev/null || true
+    echo "   GTK-Icon-Cache aktualisiert"
+fi
+
+# 3) udev-Regel entfernen
 if [ -f "$UDEV_RULE" ]; then
     echo "📋  Entferne udev-Regel: $UDEV_RULE"
     sudo rm -f "$UDEV_RULE"
@@ -47,7 +68,7 @@ else
     echo "   — Keine udev-Regel vorhanden, übersprungen"
 fi
 
-# 3) Virtual Environment entfernen
+# 4) Virtual Environment entfernen
 if [ -d "$VENV_DIR" ]; then
     read -p "📋  Virtual Environment '$VENV_DIR' löschen? (y/N) " -n 1 -r
     echo
@@ -61,7 +82,7 @@ else
     echo "   — Kein venv vorhanden, übersprungen"
 fi
 
-# 4) Config-Verzeichnis (Log, Profiles, Descriptions)
+# 5) Config-Verzeichnis (Log, Profiles, Descriptions)
 if [ -d "$CONFIG_DIR" ]; then
     read -p "📋  Config-Verzeichnis '$CONFIG_DIR' löschen? (y/N) " -n 1 -r
     echo

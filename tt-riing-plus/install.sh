@@ -7,6 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$SCRIPT_DIR/.venv"
+ICON_NAME="tt-riing-plus"
 
 echo "=== TT Riing Plus Installation ==="
 echo ""
@@ -28,7 +29,6 @@ fi
 # ── 3. Python-Pakete ──
 echo "[3/5] Python-Pakete installieren..."
 "$VENV_DIR/bin/pip" install -q PyQt5 hidapi psutil 2>&1 | tail -n2
-# pyqtgraph optional
 "$VENV_DIR/bin/pip" install -q pyqtgraph 2>&1 | tail -n2 || echo "  (pyqtgraph optional — übersprungen)"
 
 # ── 4. Verifikation ──
@@ -39,40 +39,67 @@ echo "  PyQt5: ${HAS_QT:-OK}"
 # ── 5. Desktop-Integration + udev ──
 echo "[5/5] Desktop-Integration..."
 
-# Icon: copy PNG to install dir (for .desktop reference)
-if [ -f "$SCRIPT_DIR/icons/icon.png" ]; then
-    cp -f "$SCRIPT_DIR/icons/icon.png" "$SCRIPT_DIR/icon.png"
-    echo "  Icon → $SCRIPT_DIR/icon.png"
+# 5a) Icons in XDG-Icon-Theme installieren (für Panel + Application-Menü)
+XDG_ICONS="$HOME/.local/share/icons/hicolor"
+for size in 16 22 24 32 48 64 128 256; do
+    src="$SCRIPT_DIR/icons/icon-${size}x${size}.png"
+    dest_dir="$XDG_ICONS/${size}x${size}/apps"
+    if [ -f "$src" ]; then
+        mkdir -p "$dest_dir"
+        cp -f "$src" "$dest_dir/${ICON_NAME}.png"
+        echo "  Icon ${size}x${size} → $dest_dir/"
+    fi
+done
+# SVG falls vorhanden
+if [ -f "$SCRIPT_DIR/icons/icon.svg" ]; then
+    mkdir -p "$XDG_ICONS/scalable/apps"
+    cp -f "$SCRIPT_DIR/icons/icon.svg" "$XDG_ICONS/scalable/apps/${ICON_NAME}.svg"
+    echo "  Icon SVG → $XDG_ICONS/scalable/apps/"
 fi
 
-# .desktop file
+# Icon-Cache aktualisieren (GTK)
+if command -v gtk-update-icon-cache &>/dev/null; then
+    gtk-update-icon-cache -f "$XDG_ICONS" 2>/dev/null || true
+    echo "  GTK-Icon-Cache aktualisiert"
+fi
+# XDG-Icon-Ressourcen neu laden
+if command -v xdg-icon-resource &>/dev/null; then
+    xdg-icon-resource forceupdate 2>/dev/null || true
+    echo "  XDG-Icon-Ressource aktualisiert"
+fi
+
+# 5b) .desktop Datei (Icon= referenziert den Namen, nicht den Pfad!)
 DESKTOP_DIR="$HOME/.local/share/applications"
 mkdir -p "$DESKTOP_DIR"
-# Replace {INSTALL_DIR} with actual path, set absolute icon path
-sed -e "s|{INSTALL_DIR}|$SCRIPT_DIR|g" \
-    -e "s|Icon=.*|Icon=$SCRIPT_DIR/icon.png|g" \
-    "$SCRIPT_DIR/tt-riing-plus.desktop" \
-    > "$DESKTOP_DIR/tt-riing-plus.desktop"
+cat > "$DESKTOP_DIR/tt-riing-plus.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=Thermaltake Riing Plus Control
+Comment=Fan and RGB control for Thermaltake Riing Plus controllers
+Exec=$SCRIPT_DIR/tt-riing-plus.sh
+Icon=$ICON_NAME
+Terminal=false
+Categories=System;HardwareSettings;
+Keywords=thermaltake;riing;fan;rgb;controller;hid;
+StartupNotify=true
+StartupWMClass=tt-riing-plus
+X-GNOME-Autostart-enabled=false
+EOF
 chmod +x "$DESKTOP_DIR/tt-riing-plus.desktop"
 echo "  .desktop → $DESKTOP_DIR/tt-riing-plus.desktop"
 
-# Update desktop database (critical for Application menu to show up)
+# Desktop-Database aktualisieren
 if command -v update-desktop-database &>/dev/null; then
     update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
     echo "  Desktop-Database aktualisiert"
 fi
 
-# Also install system-wide for panel icon (optional, requires sudo)
-if command -v xdg-desktop-icon &>/dev/null; then
-    xdg-desktop-icon install --novendor "$DESKTOP_DIR/tt-riing-plus.desktop" 2>/dev/null || true
-fi
-
-# systemd user service
+# 5c) systemd user service
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 mkdir -p "$SYSTEMD_DIR"
 cat > "$SYSTEMD_DIR/tt-riing-plus.service" << EOF
 [Unit]
-Description=Thermaltake Riing Plus Fan & RGB Control
+Description=Thermaltake Riing Plus Fan and RGB Control
 After=graphical-session.target
 
 [Service]
@@ -86,7 +113,7 @@ WantedBy=graphical-session.target
 EOF
 echo "  systemd service → $SYSTEMD_DIR"
 
-# udev-Regel
+# 5d) udev-Regel
 UDEV_FILE="/etc/udev/rules.d/99-thermaltake.rules"
 if [ ! -f "$UDEV_FILE" ]; then
     echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="264a", MODE="0666"' \

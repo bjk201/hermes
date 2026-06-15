@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
 Name=Thermaltake Riing Plus Control
-Comment=Fan & RGB control for Thermaltake Riing Plus controllers
-Exec={INSTALL_DIR}/tt-riing-plus.sh
-Icon={INSTALL_DIR}/icon.png
+Comment=Fan and RGB control for Thermaltake Riing Plus controllers
+Exec=REPLACE_ME/tt-riing-plus.sh
+Icon=tt-riing-plus
 Terminal=false
 Categories=System;HardwareSettings;
 Keywords=thermaltake;riing;fan;rgb;controller;hid;
