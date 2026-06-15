@@ -763,29 +763,24 @@ if HAS_QT:
 
             # ── RGB Effect ──
             effect_group = QGroupBox("RGB-Effekt")
-            ef = QVBoxLayout()
+            ef = QGridLayout()
+            ef.setColumnStretch(1, 1)
 
-            effect_top = QHBoxLayout()
-            effect_top.addWidget(QLabel("Modus:"))
+            ef.addWidget(QLabel("Modus:"), 0, 0)
             self.effect_combo = QComboBox()
             effect_names = [RGB_EFFECTS[m] for m in [MODE_FLOW, MODE_SPECTRUM, MODE_RIPPLE,
                                                       MODE_BLINK, MODE_PULSE, MODE_WAVE,
                                                       MODE_PER_LED, MODE_FULL]]
             self.effect_combo.addItems(effect_names)
-            self.effect_combo.setMinimumWidth(140)
+            self.effect_combo.setMinimumWidth(120)
             self.effect_combo.currentTextChanged.connect(self._on_effect_changed)
-            effect_top.addWidget(self.effect_combo)
-            effect_top.addStretch()
-            ef.addLayout(effect_top)
+            ef.addWidget(self.effect_combo, 0, 1)
 
-            effect_bot = QHBoxLayout()
-            effect_bot.addWidget(QLabel("Geschwindigkeit:"))
+            ef.addWidget(QLabel("Geschwindigkeit:"), 1, 0)
             self.efx_speed_combo = QComboBox()
             self.efx_speed_combo.addItems(list(EFFECT_SPEED_MAP.keys()))
             self.efx_speed_combo.setMinimumWidth(100)
-            effect_bot.addWidget(self.efx_speed_combo)
-            effect_bot.addStretch()
-            ef.addLayout(effect_bot)
+            ef.addWidget(self.efx_speed_combo, 1, 1)
 
             effect_group.setLayout(ef)
             layout.addWidget(effect_group)
@@ -794,9 +789,7 @@ if HAS_QT:
             color_group = QGroupBox("Farbe (funktioniert nur bei Static)")
             cl = QHBoxLayout()
             self.color_btn = QPushButton("🎨 Farbe wählen…")
-            self.color_btn.setStyleSheet(
-                "QPushButton { padding: 6px 12px; }"
-            )
+            self.color_btn.setMinimumWidth(140)
             self.color_btn.clicked.connect(self._pick_color)
             self.color_preview = QFrame()
             self.color_preview.setFixedSize(36, 36)
@@ -1214,7 +1207,7 @@ if HAS_QT:
 
         def _setup_ui(self):
             self.setWindowTitle("Thermaltake Riing Plus — Linux Control")
-            self.setMinimumSize(900, 650)
+            self.setMinimumSize(780, 600)
             self.setStyleSheet("""
                 QMainWindow { background: #2b2b2b; }
                 QWidget   { color: #e0e0e0; font-size: 13px; }
@@ -1754,18 +1747,23 @@ if HAS_QT:
                     f"Konnte systemd Service nicht ändern:\n{e}")
 
         def _history_tick(self):
-            """Called every 3s — records current temp even without auto mode."""
+            """Called every 3s — records current temp + fan speed for graph."""
             if not self.history:
                 return
             # If auto mode is active, _auto_tick already recorded
-            # If not, record current temp for the graph
             if self.auto_mode and self.auto_mode.active:
-                return  # Already recorded in _auto_tick
+                return
 
-            # Read temperature (works even without auto mode)
+            # Read temperature: use auto_mode sensor if available, else try first sensor
             temp = None
             if self.auto_mode:
-                temp = self.auto_mode.get_temperature()
+                if self.auto_mode.current_sensor:
+                    temp = self.auto_mode.get_temperature()
+                elif self.auto_mode.available_sensors:
+                    # Auto-detect: use first available sensor for graph
+                    first_sensor = self.auto_mode.available_sensors[0]
+                    self.auto_mode.set_sensor(first_sensor)
+                    temp = self.auto_mode.get_temperature()
 
             # Get current fan speed from first channel widget (best-effort)
             fan_speed = 0

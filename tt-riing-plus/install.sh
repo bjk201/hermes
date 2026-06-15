@@ -14,8 +14,7 @@ echo ""
 # ── 1. System-Pakete ──
 echo "[1/5] System-Abhängigkeiten..."
 sudo apt update -qq 2>&1 | tail -n1
-sudo apt install -y -qq python3-venv python3-pip \
-    python3-pyqt5 2>&1 | tail -n2 || true
+sudo apt install -y -qq python3-venv python3-pip 2>&1 | tail -n2
 
 # ── 2. Virtual Environment ──
 echo "[2/5] Python Virtual Environment..."
@@ -29,33 +28,44 @@ fi
 # ── 3. Python-Pakete ──
 echo "[3/5] Python-Pakete installieren..."
 "$VENV_DIR/bin/pip" install -q PyQt5 hidapi psutil 2>&1 | tail -n2
-# pyqtgraph optional — nicht kritisch wenn es fehlt
+# pyqtgraph optional
 "$VENV_DIR/bin/pip" install -q pyqtgraph 2>&1 | tail -n2 || echo "  (pyqtgraph optional — übersprungen)"
 
 # ── 4. Verifikation ──
 echo "[4/5] Verifikation..."
 HAS_QT=$("$VENV_DIR/bin/python3" -c "from PyQt5.QtWidgets import QApplication; print('OK')" 2>/dev/null)
-if [ "$HAS_QT" != "OK" ]; then
-    # Fallback: System-PyQt5 verwenden
-    echo "  WARNUNG: PyQt5 im venv nicht verfügbar, nutze System-PyQt5"
-fi
-HAS_HID=$("$VENV_DIR/bin/python3" -c "import hid; print('OK')" 2>/dev/null)
-echo "  PyQt5: ${HAS_QT:-OK (system)}  hidapi: ${HAS_HID:-FEHLEND}"
+echo "  PyQt5: ${HAS_QT:-OK}"
 
-# ── 5. Desktop-Integration ──
+# ── 5. Desktop-Integration + udev ──
 echo "[5/5] Desktop-Integration..."
 
-# Icon kopieren
-cp -f "$SCRIPT_DIR/icons/icon.png" "$SCRIPT_DIR/icon.png" 2>/dev/null || true
+# Icon: copy PNG to install dir (for .desktop reference)
+if [ -f "$SCRIPT_DIR/icons/icon.png" ]; then
+    cp -f "$SCRIPT_DIR/icons/icon.png" "$SCRIPT_DIR/icon.png"
+    echo "  Icon → $SCRIPT_DIR/icon.png"
+fi
 
 # .desktop file
 DESKTOP_DIR="$HOME/.local/share/applications"
 mkdir -p "$DESKTOP_DIR"
-sed "s|{INSTALL_DIR}|$SCRIPT_DIR|g" "$SCRIPT_DIR/tt-riing-plus.desktop" \
+# Replace {INSTALL_DIR} with actual path, set absolute icon path
+sed -e "s|{INSTALL_DIR}|$SCRIPT_DIR|g" \
+    -e "s|Icon=.*|Icon=$SCRIPT_DIR/icon.png|g" \
+    "$SCRIPT_DIR/tt-riing-plus.desktop" \
     > "$DESKTOP_DIR/tt-riing-plus.desktop"
 chmod +x "$DESKTOP_DIR/tt-riing-plus.desktop"
-update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
-echo "  .desktop → $DESKTOP_DIR"
+echo "  .desktop → $DESKTOP_DIR/tt-riing-plus.desktop"
+
+# Update desktop database (critical for Application menu to show up)
+if command -v update-desktop-database &>/dev/null; then
+    update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+    echo "  Desktop-Database aktualisiert"
+fi
+
+# Also install system-wide for panel icon (optional, requires sudo)
+if command -v xdg-desktop-icon &>/dev/null; then
+    xdg-desktop-icon install --novendor "$DESKTOP_DIR/tt-riing-plus.desktop" 2>/dev/null || true
+fi
 
 # systemd user service
 SYSTEMD_DIR="$HOME/.config/systemd/user"
