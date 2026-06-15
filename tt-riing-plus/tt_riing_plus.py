@@ -1307,8 +1307,25 @@ if HAS_QT:
             elif HAS_FEATURES:
                 gp = QWidget()
                 gp_l = QVBoxLayout(gp)
-                gp_l.addWidget(QLabel("📈 Live-Graph"))
-                gp_l.addWidget(QLabel("pyqtgraph nicht installiert — pip3 install pyqtgraph"))
+                gp_l.addWidget(QLabel("📈 Live-Graph — Temperatur & Lüfter über Zeit"))
+                gp_l.addSpacing(8)
+                info = QLabel(
+                    "pyqtgraph ist nicht installiert.\n\n"
+                    "Zum Installieren:\n"
+                    "  .venv/bin/pip install pyqtgraph\n\n"
+                    "Oder im Terminal:\n"
+                    "  pip3 install --user pyqtgraph"
+                )
+                info.setStyleSheet("color: #999; font-size: 12px;")
+                info.setWordWrap(True)
+                gp_l.addWidget(info)
+                install_btn = QPushButton("📦 pyqtgraph installieren")
+                install_btn.setStyleSheet(
+                    "QPushButton { background: #2980b9; color: white; padding: 8px 16px; "
+                    "border-radius: 4px; max-width: 250px; }"
+                )
+                install_btn.clicked.connect(self._install_pyqtgraph)
+                gp_l.addWidget(install_btn)
                 gp_l.addStretch()
                 self.tabs.addTab(gp, "  📈 Graph  ")
                 self.graph_widget = None
@@ -1383,8 +1400,8 @@ if HAS_QT:
 
                 ctrl_row.addWidget(QLabel("Sensor:"))
                 self.auto_sensor_combo = QComboBox()
-                self.auto_sensor_combo.setMinimumWidth(220)
-                self.auto_sensor_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+                self.auto_sensor_combo.setMinimumWidth(180)
+                self.auto_sensor_combo.setMaximumWidth(280)
                 self._update_sensor_combo()
                 self.auto_sensor_combo.currentTextChanged.connect(self._change_auto_sensor)
                 ctrl_row.addWidget(self.auto_sensor_combo)
@@ -1400,6 +1417,16 @@ if HAS_QT:
                 self.auto_fan_label.setStyleSheet(
                     "color: #3498db; font-weight: bold; font-size: 14px; min-width: 50px;")
                 ctrl_row.addWidget(self.auto_fan_label)
+
+                # Auto-Start switch
+                self.autostart_btn = QPushButton("🔄 Aus")
+                self.autostart_btn.setToolTip("Auto-Start beim Systemstart aktivieren/deaktivieren")
+                self.autostart_btn.setStyleSheet(
+                    "QPushButton { background: #555; color: #ccc; padding: 4px 10px; "
+                    "border-radius: 4px; font-size: 11px; max-width: 60px; }"
+                )
+                self.autostart_btn.clicked.connect(self._toggle_autostart)
+                ctrl_row.addWidget(self.autostart_btn)
 
                 ctrl_row.addStretch()
                 auto_layout.addLayout(ctrl_row)
@@ -1419,6 +1446,9 @@ if HAS_QT:
                 self._sensor_timer.timeout.connect(self._update_sensor_display)
                 self._sensor_timer.start(2000)
                 self._update_sensor_display()
+
+                # Initialize auto-start button state
+                self._update_autostart_button()
 
             global_group.setLayout(global_vbox)
             main_layout.addWidget(global_group)
@@ -1656,6 +1686,72 @@ if HAS_QT:
                         self.auto_temp_label.setText(f"{result['temp']:.1f}°C")
                     if hasattr(self, 'auto_fan_label'):
                         self.auto_fan_label.setText(f"Fan: {result['fan_speed']}%")
+
+        def _update_autostart_button(self):
+            """Check systemd status and update button label."""
+            import subprocess
+            try:
+                result = subprocess.run(
+                    ["systemctl", "--user", "is-enabled", "tt-riing-plus.service"],
+                    capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    self.autostart_btn.setText("🔄 An")
+                    self.autostart_btn.setStyleSheet(
+                        "QPushButton { background: #27ae60; color: white; padding: 4px 10px; "
+                        "border-radius: 4px; font-size: 11px; max-width: 60px; }")
+                else:
+                    self.autostart_btn.setText("🔄 Aus")
+                    self.autostart_btn.setStyleSheet(
+                        "QPushButton { background: #555; color: #ccc; padding: 4px 10px; "
+                        "border-radius: 4px; font-size: 11px; max-width: 60px; }")
+            except Exception:
+                pass
+
+        def _install_pyqtgraph(self):
+            """Install pyqtgraph from the Graph tab button."""
+            import subprocess
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            venv_pip = os.path.join(script_dir, ".venv", "bin", "pip")
+            if not os.path.exists(venv_pip):
+                venv_pip = "pip3"
+            try:
+                subprocess.run([venv_pip, "install", "-q", "pyqtgraph"], check=True, timeout=60)
+                QMessageBox.information(self, "pyqtgraph",
+                    "pyqtgraph wurde installiert.\n\nBitte die App neu starten.")
+            except Exception as e:
+                QMessageBox.warning(self, "Fehler",
+                    f"Installation fehlgeschlagen:\n{e}\n\n"
+                    f"Manuell: {venv_pip} install pyqtgraph")
+
+        def _toggle_autostart(self):
+            """Toggle systemd user service for auto-start."""
+            import subprocess
+            try:
+                result = subprocess.run(
+                    ["systemctl", "--user", "is-enabled", "tt-riing-plus.service"],
+                    capture_output=True, text=True, timeout=5)
+                is_enabled = result.returncode == 0
+                if is_enabled:
+                    subprocess.run(
+                        ["systemctl", "--user", "disable", "--now", "tt-riing-plus.service"],
+                        check=True, timeout=5)
+                    self.autostart_btn.setText("🔄 Aus")
+                    self.autostart_btn.setStyleSheet(
+                        "QPushButton { background: #555; color: #ccc; padding: 4px 10px; "
+                        "border-radius: 4px; font-size: 11px; max-width: 60px; }")
+                    self.statusBar().showMessage("Auto-Start deaktiviert", 3000)
+                else:
+                    subprocess.run(
+                        ["systemctl", "--user", "enable", "--now", "tt-riing-plus.service"],
+                        check=True, timeout=5)
+                    self.autostart_btn.setText("🔄 An")
+                    self.autostart_btn.setStyleSheet(
+                        "QPushButton { background: #27ae60; color: white; padding: 4px 10px; "
+                        "border-radius: 4px; font-size: 11px; max-width: 60px; }")
+                    self.statusBar().showMessage("Auto-Start aktiviert", 3000)
+            except Exception as e:
+                QMessageBox.warning(self, "Auto-Start",
+                    f"Konnte systemd Service nicht ändern:\n{e}")
 
         def _history_tick(self):
             """Called every 3s — records current temp even without auto mode."""
