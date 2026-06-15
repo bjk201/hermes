@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Thermaltake Riing Plus Control
+Comment=Fan & RGB control for Thermaltake Riing Plus controllers
+Exec={INSTALL_DIR}/tt-riing-plus.sh
+Icon={INSTALL_DIR}/icon.png
+Terminal=false
+Categories=System;HardwareSettings;
+Keywords=thermaltake;riing;fan;rgb;controller;hid;
+StartupNotify=true
+StartupWMClass=tt-riing-plus
+X-GNOME-Autostart-enabled=false

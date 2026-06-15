@@ -109,6 +109,7 @@ class ProfileManager:
         """
         Apply a profile to the controller.
         Returns list of (channel, fan_speed, mode) tuples for channels that were set.
+        NOTE: Does NOT touch channel descriptions — those are independent of profiles.
         """
         profile = self.profiles.get(name)
         if not profile:
@@ -142,7 +143,32 @@ class ProfileManager:
         return applied
 
 
-# ── Auto Mode (Temperature-based fan control) ────────
+# ── Channel Descriptions ──────────────────────────────
+
+DESC_FILE = os.path.join(PROFILE_DIR, "channel_descriptions.json")
+
+
+def load_channel_descriptions() -> dict:
+    """Load channel descriptions from JSON. Returns {channel_idx_str: "description"}."""
+    try:
+        if os.path.exists(DESC_FILE):
+            with open(DESC_FILE, "r") as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                return raw
+    except Exception:
+        pass
+    return {}
+
+
+def save_channel_descriptions(descriptions: dict):
+    """Save channel descriptions to JSON. descriptions: {channel_idx_str: "text"}."""
+    try:
+        os.makedirs(os.path.dirname(DESC_FILE), exist_ok=True)
+        with open(DESC_FILE, "w") as f:
+            json.dump(descriptions, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
 
 try:
     import psutil

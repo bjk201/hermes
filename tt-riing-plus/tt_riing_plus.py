@@ -50,7 +50,7 @@ try:
         QLabel, QSlider, QPushButton, QComboBox, QColorDialog,
         QGroupBox, QGridLayout, QSpinBox, QTabWidget, QStatusBar,
         QCheckBox, QFrame, QScrollArea, QMessageBox, QFileDialog,
-        QDialog, QTextEdit, QPlainTextEdit
+        QDialog, QTextEdit, QPlainTextEdit, QLineEdit,
     )
     from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
     from PyQt5.QtGui import QColor, QPainter, QBrush, QPen, QFont, QPixmap, QIcon
@@ -113,6 +113,7 @@ try:
         FAN_CURVE, FAN_MIN, AUTO_UPDATE_MS,
         HAS_PSUTIL, HAS_PYQTGRAPH,
         DEFAULT_PROFILES, PROFILE_FILE,
+        load_channel_descriptions, save_channel_descriptions,
     )
     HAS_FEATURES = True
 except ImportError:
@@ -569,9 +570,47 @@ class TTController:
         self._commit_fan()
         tt_log("INFO", f"set_speed ch={channel} percent={val}%")
 
-    def apply(self):
-        """No-op in this protocol — each command is immediate."""
-        pass
+    def try_read_status(self) -> dict:
+        """
+        Attempt to read current status from the controller.
+        The Thermaltake Riing Plus protocol is mostly write-only; this is a
+        best-effort attempt. Returns a dict with whatever could be read.
+        Unreadable fields are set to None and should be shown as "?"
+        in the UI.
+        """
+        status = {
+            "modes": [None] * self.num_channels,
+            "speeds": [None] * self.num_channels,
+            "fan_speeds": [None] * self.num_channels,
+            "readable": False,
+        }
+        if self.test_mode or not self.devs:
+            tt_log("DEBUG", "try_read_status: test_mode or no devices — returning empty")
+            return status
+
+        # Try reading from the init response
+        try:
+            # Send a status request (some controllers respond to init with status)
+            buf = bytearray(REPORT_SIZE)
+            buf[0] = REPORT_ID
+            buf[1] = CMD_INIT
+            buf[2] = SUB_INIT
+            self._send_packet(bytes(buf))
+            time.sleep(0.1)
+            resp = self._read_response(timeout_ms=500)
+            if resp and len(resp) >= REPORT_SIZE:
+                status["readable"] = True
+                tt_log("DEBUG", f"try_read_status: got {len(resp)} bytes response")
+                # NOTE: The Thermaltake protocol does not provide per-channel
+                # status readout. The response (if any) is just an ACK.
+                # We log it for debugging but cannot extract actual values.
+                tt_log("WARNING",
+                    "Controller-Status auslesen wird vom Thermaltake-Protokoll "
+                    "nicht unterstützt (write-only). Manuelle Eingabe erforderlich.")
+        except Exception as e:
+            tt_log("DEBUG", f"try_read_status: read failed: {e}")
+
+        return status
 
     def all_off(self):
         """Turn off all LEDs and stop all fans."""
@@ -638,26 +677,55 @@ if HAS_QT:
 
 
     class ChannelControl(QWidget):
-        """Full controls for one channel: speed, color, effect."""
+        """Full controls for one channel: description, speed, color, effect."""
 
         def __init__(self, channel_idx: int, num_fans: int, controller: TTController, parent=None):
             super().__init__(parent)
             self.ch = channel_idx
             self.nf = num_fans
             self.ctl = controller
+            self._description = ""
             self._setup_ui()
 
         def _setup_ui(self):
             layout = QVBoxLayout(self)
-            layout.setSpacing(8)
+            layout.setSpacing(6)
 
-            # ── Ring preview
-            preview_box = QHBoxLayout()
-            preview_box.addWidget(QLabel(f"CH{self.ch + 1}:"))
-            self.ring = RingWidget(LEDS_PER_FAN)
-            preview_box.addWidget(self.ring)
+            # ── Channel header: icon + description + fan count ──
+            header = QHBoxLayout()
+            header.setSpacing(6)
+            ch_icon = QLabel("💨")
+            ch_icon.setFont(QFont("Sans", 16))
+            header.addWidget(ch_icon)
+
+            # Editable channel description
+            desc_layout = QVBoxLayout()
+            desc_layout.setSpacing(2)
+            desc_label = QLabel("Kanalbezeichnung:")
+            desc_label.setStyleSheet("color: #999; font-size: 11px;")
+            self.desc_edit = QLineEdit()
+            self.desc_edit.setPlaceholderText("z.B. CPU Radiator, Front Fans, Top LED Stripe …")
+            self.desc_edit.setMaxLength(64)
+            self.desc_edit.setStyleSheet(
+                "QLineEdit { background: #3a3a3a; color: #e0e0e0; padding: 4px 8px; "
+                "border: 1px solid #555; border-radius: 4px; font-size: 13px; }"
+                "QLineEdit:focus { border-color: #e67e22; }"
+            )
+            self.desc_edit.editingFinished.connect(self._on_desc_changed)
+            desc_layout.addWidget(desc_label)
+            desc_layout.addWidget(self.desc_edit)
+            header.addLayout(desc_layout, 1)
+
             self.fan_label = QLabel(f"({self.nf} Lüfter)")
-            preview_box.addWidget(self.fan_label)
+            self.fan_label.setStyleSheet("color: #777; font-size: 11px;")
+            header.addWidget(self.fan_label)
+            layout.addLayout(header)
+
+            # ── Ring preview (compact) ──
+            preview_box = QHBoxLayout()
+            self.ring = RingWidget(LEDS_PER_FAN)
+            self.ring.setFixedSize(120, 120)
+            preview_box.addWidget(self.ring)
             preview_box.addStretch()
             layout.addLayout(preview_box)
 
@@ -672,6 +740,7 @@ if HAS_QT:
             self.speed_slider.valueChanged.connect(self._on_speed_changed)
             self.speed_label = QLabel("50%")
             self.speed_label.setMinimumWidth(40)
+            self.speed_label.setStyleSheet("color: #e67e22; font-weight: bold; font-size: 14px;")
             sl.addWidget(self.speed_slider)
             sl.addWidget(self.speed_label)
             speed_group.setLayout(sl)
@@ -681,6 +750,9 @@ if HAS_QT:
             preset_row = QHBoxLayout()
             for name, val in FAN_SPEED_PRESETS.items():
                 btn = QPushButton(name)
+                btn.setStyleSheet(
+                    "QPushButton { padding: 4px 10px; font-size: 11px; }"
+                )
                 btn.clicked.connect(partial(self._set_preset, val, name))
                 preset_row.addWidget(btn)
             layout.addLayout(preset_row)
@@ -692,11 +764,11 @@ if HAS_QT:
             effect_top = QHBoxLayout()
             effect_top.addWidget(QLabel("Modus:"))
             self.effect_combo = QComboBox()
-            # Use OpenRGB mode names in correct order
             effect_names = [RGB_EFFECTS[m] for m in [MODE_FLOW, MODE_SPECTRUM, MODE_RIPPLE,
                                                       MODE_BLINK, MODE_PULSE, MODE_WAVE,
                                                       MODE_PER_LED, MODE_FULL]]
             self.effect_combo.addItems(effect_names)
+            self.effect_combo.setMinimumWidth(140)
             self.effect_combo.currentTextChanged.connect(self._on_effect_changed)
             effect_top.addWidget(self.effect_combo)
             effect_top.addStretch()
@@ -706,6 +778,7 @@ if HAS_QT:
             effect_bot.addWidget(QLabel("Geschwindigkeit:"))
             self.efx_speed_combo = QComboBox()
             self.efx_speed_combo.addItems(list(EFFECT_SPEED_MAP.keys()))
+            self.efx_speed_combo.setMinimumWidth(100)
             effect_bot.addWidget(self.efx_speed_combo)
             effect_bot.addStretch()
             ef.addLayout(effect_bot)
@@ -716,11 +789,16 @@ if HAS_QT:
             # ── Color Picker ──
             color_group = QGroupBox("Farbe (funktioniert nur bei Static)")
             cl = QHBoxLayout()
-            self.color_btn = QPushButton("Farbe wählen…")
+            self.color_btn = QPushButton("🎨 Farbe wählen…")
+            self.color_btn.setStyleSheet(
+                "QPushButton { padding: 6px 12px; }"
+            )
             self.color_btn.clicked.connect(self._pick_color)
             self.color_preview = QFrame()
             self.color_preview.setFixedSize(36, 36)
-            self.color_preview.setStyleSheet("background-color: rgb(255,100,0); border-radius: 4px;")
+            self.color_preview.setStyleSheet(
+                "background-color: rgb(255,100,0); border-radius: 6px; border: 2px solid #555;"
+            )
             self.current_color = QColor(255, 100, 0)
             cl.addWidget(self.color_btn)
             cl.addWidget(self.color_preview)
@@ -739,16 +817,17 @@ if HAS_QT:
             self.bright_slider.valueChanged.connect(self._on_brightness_changed)
             self.bright_label = QLabel("100%")
             self.bright_label.setMinimumWidth(40)
+            self.bright_label.setStyleSheet("color: #e67e22; font-weight: bold;")
             bl.addWidget(self.bright_slider)
             bl.addWidget(self.bright_label)
             bright_group.setLayout(bl)
             layout.addWidget(bright_group)
 
             # ── Apply ──
-            apply_btn = QPushButton("⚠️ Auf Kanal anwenden")
+            apply_btn = QPushButton("📤 Auf Kanal anwenden")
             apply_btn.setStyleSheet(
-                "QPushButton { background-color: #e67e22; color: white; font-weight: bold;"
-                "padding: 8px; border-radius: 6px; }"
+                "QPushButton { background-color: #e67e22; color: white; font-weight: bold; "
+                "padding: 8px; border-radius: 6px; font-size: 13px; }"
                 "QPushButton:hover { background-color: #d35400; }"
             )
             apply_btn.clicked.connect(self._apply)
@@ -771,12 +850,16 @@ if HAS_QT:
         def _on_brightness_changed(self, val):
             self.bright_label.setText(f"{val}%")
 
+        def _on_desc_changed(self):
+            self._description = self.desc_edit.text().strip()
+
         def _pick_color(self):
             c = QColorDialog.getColor(self.current_color, self, "RGB-Farbe wählen")
             if c.isValid():
                 self.current_color = c
                 self.color_preview.setStyleSheet(
-                    f"background-color: rgb({c.red()},{c.green()},{c.blue()}); border-radius: 4px;"
+                    f"background-color: rgb({c.red()},{c.green()},{c.blue()}); "
+                    f"border-radius: 6px; border: 2px solid #555;"
                 )
                 colors = [(c.red(), c.green(), c.blue())] * LEDS_PER_FAN
                 self.ring.set_colors(colors)
@@ -810,6 +893,15 @@ if HAS_QT:
                     self.ctl.set_color(self.ch, colors)
             except Exception as e:
                 QMessageBox.warning(self, "Fehler", f"Konnte Befehl nicht senden:\n{e}")
+
+        def set_description(self, text: str):
+            """Set the channel description text."""
+            self._description = text
+            self.desc_edit.setText(text)
+
+        def get_description(self) -> str:
+            """Get the current channel description."""
+            return self.desc_edit.text().strip()
 
 
     class LogWindow(QDialog):
@@ -1094,7 +1186,20 @@ if HAS_QT:
             if self.controller.test_mode:
                 self.statusBar().showMessage("⚠️ Kein USB-Gerät gefunden — Demo-Modus aktiv")
             else:
-                self.statusBar().showMessage("✅ Thermaltake Riing Plus verbunden")
+                dev_count = len(self.controller.devs)
+                ch_count = self.controller.num_channels
+                # Try to read actual controller status (best-effort)
+                ctrl_status = self.controller.try_read_status()
+                if ctrl_status and ctrl_status.get("readable"):
+                    status_text = " (Controller-Auslesung versucht)"
+                else:
+                    status_text = " — manuelle Konfiguration"
+                if dev_count > 1:
+                    self.statusBar().showMessage(
+                        f"✅ {dev_count} Controller verbunden — {ch_count} Kanäle — bereit{status_text}")
+                else:
+                    self.statusBar().showMessage(
+                        f"✅ Controller verbunden — {ch_count} Kanäle — bereit{status_text}")
 
             # ── Feature instances ──
             self.profile_mgr = ProfileManager() if HAS_FEATURES else None
@@ -1114,13 +1219,23 @@ if HAS_QT:
                     font-weight: bold; padding: 12px 8px;
                 }
                 QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
-                QPushButton { background: #3a3a3a; border: 1px solid #555; padding: 6px 12px; border-radius: 4px; }
+                QPushButton { background: #3a3a3a; border: 1px solid #555; padding: 6px 12px; border-radius: 4px; color: #e0e0e0; }
                 QPushButton:hover { background: #4a4a4a; }
-                QComboBox  { background: #3a3a3a; padding: 4px; border: 1px solid #555; border-radius: 4px; }
+                QPushButton:disabled { background: #2a2a2a; color: #666; }
+                QComboBox  { background: #3a3a3a; color: #e0e0e0; padding: 4px 8px; border: 1px solid #555; border-radius: 4px; min-height: 24px; }
+                QComboBox::drop-down { border: none; width: 24px; }
+                QComboBox QAbstractItemView { background: #3a3a3a; color: #e0e0e0; selection-background-color: #e67e22; }
                 QSlider::groove:horizontal { height: 8px; background: #444; border-radius: 4px; }
                 QSlider::handle:horizontal { background: #e67e22; width: 16px; margin: -4px 0; border-radius: 3px; }
-                QLabel  { color: #ccc; }
+                QSlider::handle:horizontal:disabled { background: #555; }
+                QLabel  { color: #e0e0e0; }
                 QStatusBar { background: #1a1a1a; color: #aaa; }
+                QTabWidget::pane { border: 1px solid #555; }
+                QTabBar::tab { background: #3a3a3a; color: #ccc; padding: 8px 16px; border: 1px solid #555; border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px; }
+                QTabBar::tab:selected { background: #4a4a4a; color: #e67e22; font-weight: bold; }
+                QTabBar::tab:hover { background: #4a4a4a; }
+                QCheckBox { color: #e0e0e0; }
+                QCheckBox::indicator { width: 16px; height: 16px; }
             """)
 
             central = QWidget()
@@ -1129,32 +1244,54 @@ if HAS_QT:
 
             # ── Header ──
             header = QHBoxLayout()
-            title = QLabel("🌈 Thermaltake Riing Plus — Linux Fan & RGB Control")
+            # App icon (emoji fallback — later replaceable with QIcon)
+            app_icon = QLabel("🌈")
+            app_icon.setFont(QFont("Sans", 22))
+            header.addWidget(app_icon)
+
+            title = QLabel("Thermaltake Riing Plus — Linux Fan & RGB Control")
             title.setFont(QFont("Sans", 18, QFont.Bold))
             title.setStyleSheet("color: #e67e22;")
             header.addWidget(title)
             header.addStretch()
 
+            # ── USB Status: show ALL connected controllers ──
             if self.controller.test_mode:
                 usb_text = "🔌 USB: NICHT VERBUNDEN"
                 usb_color = "#e74c3c"
             else:
-                name = getattr(self.controller, '_detected_name', 'Unknown')
-                pid  = getattr(self.controller, '_detected_pid', 0)
-                usb_text = f"🔌 USB: {name} (PID {pid:#06x})"
+                # Show ALL connected controllers, not just the first one
+                controller_names = []
+                for _, pid, name in self.controller.devs:
+                    controller_names.append(f"{name}")
+                if len(controller_names) > 1:
+                    usb_text = f"🔌 USB: {' + '.join(controller_names)}"
+                else:
+                    usb_text = f"🔌 USB: {controller_names[0]}"
                 usb_color = "#2ecc71"
             self.usb_status = QLabel(usb_text)
-            self.usb_status.setStyleSheet(f"color: {usb_color};")
+            self.usb_status.setStyleSheet(f"color: {usb_color}; font-size: 12px;")
             header.addWidget(self.usb_status)
             main_layout.addLayout(header)
 
             # ── Channel Tabs + Graph Tab ──
             self.tabs = QTabWidget()
             self.tab_widgets = []
+            # Load channel descriptions
+            self._channel_descriptions = {}
+            if HAS_FEATURES:
+                self._channel_descriptions = load_channel_descriptions()
+
             for ch in range(self.controller.num_channels):
                 nc = ChannelControl(ch, self.controller.num_fans[ch], self.controller)
+                # Restore channel description
+                desc = self._channel_descriptions.get(str(ch), "")
+                if desc:
+                    nc.set_description(desc)
                 self.tab_widgets.append(nc)
-                self.tabs.addTab(nc, f"  CH {ch + 1}  ")
+                # Tab label: show description if available
+                tab_label = f"  CH {ch + 1}  "
+                self.tabs.addTab(nc, tab_label)
 
             # Graph tab
             if HAS_FEATURES and HAS_PYQTGRAPH:
@@ -1192,49 +1329,62 @@ if HAS_QT:
                 gl.addWidget(QLabel("  |  "))
                 self.profile_combo = QComboBox()
                 self.profile_combo.addItems(self.profile_mgr.list_profiles())
-                self.profile_combo.setMinimumWidth(120)
+                self.profile_combo.setMinimumWidth(140)
                 gl.addWidget(QLabel("Profil:"))
                 gl.addWidget(self.profile_combo)
 
-                load_btn = QPushButton("📂 Laden")
+                load_btn = QPushButton("📂 Profil laden")
+                load_btn.setToolTip("Gespeichertes Profil laden und anwenden")
                 load_btn.clicked.connect(self._load_profile)
                 gl.addWidget(load_btn)
 
-                save_btn = QPushButton("💾 Speichern")
+                save_btn = QPushButton("💾 Profil speichern")
+                save_btn.setToolTip("Aktuelle Einstellungen als Profil speichern")
                 save_btn.clicked.connect(self._save_profile)
                 gl.addWidget(save_btn)
 
             # ── Auto mode + Sensor live display ──
             if HAS_FEATURES and self.auto_mode and self.auto_mode.available_sensors:
-                auto_group = QGroupBox("Auto-Modus")
+                auto_group = QGroupBox("🌡 Auto-Modus")
                 auto_layout = QVBoxLayout()
-                auto_layout.setSpacing(2)
-                auto_layout.setContentsMargins(4, 4, 4, 4)
+                auto_layout.setSpacing(4)
+                auto_layout.setContentsMargins(6, 4, 6, 4)
 
-                # Row 1: Checkbox + Sensor dropdown (compact)
+                # Row 1: Checkbox + Sensor dropdown + current temp
                 ctrl_row = QHBoxLayout()
-                self.auto_cb = QCheckBox("Auto-Modus")
+                self.auto_cb = QCheckBox("Auto-Modus aktiv")
                 self.auto_cb.stateChanged.connect(self._toggle_auto_mode)
                 ctrl_row.addWidget(self.auto_cb)
-                ctrl_row.addWidget(QLabel("Quelle:"))
+
+                ctrl_row.addWidget(QLabel("Sensor:"))
                 self.auto_sensor_combo = QComboBox()
-                self.auto_sensor_combo.setMinimumWidth(180)
+                self.auto_sensor_combo.setMinimumWidth(220)
+                self.auto_sensor_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
                 self._update_sensor_combo()
                 self.auto_sensor_combo.currentTextChanged.connect(self._change_auto_sensor)
                 ctrl_row.addWidget(self.auto_sensor_combo)
+
+                # Current temperature display
+                self.auto_temp_label = QLabel("—°C")
+                self.auto_temp_label.setStyleSheet("color: #e74c3c; font-weight: bold; font-size: 14px; min-width: 50px;")
+                ctrl_row.addWidget(self.auto_temp_label)
+
+                # Current auto fan speed display
+                self.auto_fan_label = QLabel("Fan: —%")
+                self.auto_fan_label.setStyleSheet("color: #3498db; font-weight: bold; font-size: 14px; min-width: 50px;")
+                ctrl_row.addWidget(self.auto_fan_label)
+
                 ctrl_row.addStretch()
                 auto_layout.addLayout(ctrl_row)
 
-                # Row 2: Live sensor readings (single line, compact)
-                sensor_label = QLabel("🌡 ...")
-                sensor_label.setStyleSheet("color: #777; font-size: 10px;")
-                sensor_label.setWordWrap(False)
-                sensor_label.setMaximumHeight(16)
-                self.sensor_table_label = sensor_label
-                auto_layout.addWidget(sensor_label)
+                # Row 2: All sensor readings (compact, single line)
+                self.sensor_table_label = QLabel("Sensoren: …")
+                self.sensor_table_label.setStyleSheet("color: #888; font-size: 10px;")
+                self.sensor_table_label.setWordWrap(False)
+                auto_layout.addWidget(self.sensor_table_label)
 
                 auto_group.setLayout(auto_layout)
-                auto_group.setMaximumHeight(72)
+                auto_group.setMaximumHeight(85)
                 gl.addWidget(auto_group)
 
                 # Sensor live update timer (every 2s)
@@ -1328,6 +1478,35 @@ if HAS_QT:
                         if ch < len(self.tab_widgets):
                             w = self.tab_widgets[ch]
                             w.speed_slider.setValue(data.get("fan_speed", 50))
+                            # Update effect combo
+                            mode = data.get("mode", 0x19)
+                            mode_name = RGB_EFFECTS.get(mode, "Static")
+                            idx = w.effect_combo.findText(mode_name)
+                            if idx >= 0:
+                                w.effect_combo.setCurrentIndex(idx)
+                            # Update color for Static mode
+                            if mode == 0x19 and "color" in data:
+                                r, g, b = data["color"]
+                                w.current_color = QColor(r, g, b)
+                                w.color_preview.setStyleSheet(
+                                    f"background-color: rgb({r},{g},{b}); "
+                                    f"border-radius: 6px; border: 2px solid #555;"
+                                )
+                                colors = [(r, g, b)] * LEDS_PER_FAN
+                                w.ring.set_colors(colors)
+                            # Update effect speed
+                            speed_val = data.get("speed", 0x02)
+                            for sp_name, sp_val in EFFECT_SPEED_MAP.items():
+                                if sp_val == speed_val:
+                                    idx = w.efx_speed_combo.findText(sp_name)
+                                    if idx >= 0:
+                                        w.efx_speed_combo.setCurrentIndex(idx)
+                                    break
+                            # Update brightness
+                            brightness = data.get("brightness", 100)
+                            w.bright_slider.setValue(brightness)
+                # NOTE: Channel descriptions are NOT touched by profile load
+                # They are stored separately in channel_descriptions.json
             else:
                 self.statusBar().showMessage(f"Profil '{name}' konnte nicht angewendet werden", 5000)
 
@@ -1347,6 +1526,7 @@ if HAS_QT:
                     "mode": mode_key,
                     "speed": efx_spd,
                     "color": [c.red(), c.green(), c.blue()],
+                    "brightness": w.bright_slider.value(),
                 }
             self.profile_mgr.save_profile(name, channels_data)
             self.statusBar().showMessage(f"Profil '{name}' gespeichert", 5000)
@@ -1393,20 +1573,35 @@ if HAS_QT:
             self.auto_sensor_combo.blockSignals(False)
 
         def _update_sensor_display(self):
-            """Update the live sensor readings table."""
+            """Update the live sensor readings + current temp/fan labels."""
             if not self.auto_mode or not self.sensor_table_label:
                 return
             readings = self.auto_mode.get_all_sensor_readings()
             if not readings:
-                self.sensor_table_label.setText("🌡 Keine Sensoren verfügbar")
+                self.sensor_table_label.setText("Sensoren: Keine verfügbar")
                 return
-            lines = []
+
+            # Compact single-line display of all sensors
+            parts = []
             for r in readings:
                 temp_str = f"{r['temp']:.1f}°C" if r['temp'] is not None else "N/A"
-                label_str = f" ({r['label']})" if r['label'] != r['key'] else ""
                 marker = " ◀" if r['key'] == self.auto_mode.current_sensor else ""
-                lines.append(f"  {r['key']}{label_str}: {temp_str}{marker}")
-            self.sensor_table_label.setText("🌡 Live-Sensoren:\n" + "\n".join(lines))
+                parts.append(f"{r['key']}: {temp_str}{marker}")
+            self.sensor_table_label.setText("Sensoren: " + " | ".join(parts))
+
+            # Update current temp label
+            if self.auto_mode.current_sensor:
+                temp = self.auto_mode.get_temperature()
+                if temp is not None:
+                    self.auto_temp_label.setText(f"{temp:.1f}°C")
+                else:
+                    self.auto_temp_label.setText("—°C")
+
+            # Update auto fan speed label
+            if self.auto_mode.active and self.auto_mode._last_fan_speed is not None:
+                self.auto_fan_label.setText(f"Fan: {self.auto_mode._last_fan_speed}%")
+            else:
+                self.auto_fan_label.setText("Fan: —%")
 
         def _auto_tick(self):
             """Called by QTimer — runs on GUI thread."""
@@ -1418,6 +1613,11 @@ if HAS_QT:
                         fan_spd = result.get("fan_speed")
                         temp = result.get("temp")
                         self.history.add(temp, fan_spd)
+                    # Update live labels
+                    if hasattr(self, 'auto_temp_label'):
+                        self.auto_temp_label.setText(f"{result['temp']:.1f}°C")
+                    if hasattr(self, 'auto_fan_label'):
+                        self.auto_fan_label.setText(f"Fan: {result['fan_speed']}%")
 
         def _history_tick(self):
             """Called every 3s — records current temp even without auto mode."""
@@ -1448,6 +1648,14 @@ if HAS_QT:
                 self._history_timer.stop()
             if hasattr(self, '_sensor_timer'):
                 self._sensor_timer.stop()
+            # Save channel descriptions
+            if HAS_FEATURES:
+                descs = {}
+                for ch, w in enumerate(self.tab_widgets):
+                    d = w.get_description()
+                    if d:
+                        descs[str(ch)] = d
+                save_channel_descriptions(descs)
             self.controller.close()
             event.accept()
 
