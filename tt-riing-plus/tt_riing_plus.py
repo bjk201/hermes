@@ -741,6 +741,10 @@ if HAS_QT:
             self.speed_label = QLabel("50%")
             self.speed_label.setMinimumWidth(40)
             self.speed_label.setStyleSheet("color: #e67e22; font-weight: bold; font-size: 14px;")
+            # Tooltip: controller state is write-only, values are not readable
+            self.speed_slider.setToolTip(
+                "Hinweis: Der aktuelle Lüfterstand kann nicht vom Controller ausgelesen werden. "
+                "Der Wert wird beim Start auf 50% gesetzt.")
             sl.addWidget(self.speed_slider)
             sl.addWidget(self.speed_label)
             speed_group.setLayout(sl)
@@ -1288,9 +1292,12 @@ if HAS_QT:
                 desc = self._channel_descriptions.get(str(ch), "")
                 if desc:
                     nc.set_description(desc)
+                # Connect description change → update tab label
+                nc.desc_edit.editingFinished.connect(
+                    partial(self._update_tab_label, ch))
                 self.tab_widgets.append(nc)
                 # Tab label: show description if available
-                tab_label = f"  CH {ch + 1}  "
+                tab_label = self._make_tab_label(ch, desc)
                 self.tabs.addTab(nc, tab_label)
 
             # Graph tab
@@ -1312,6 +1319,9 @@ if HAS_QT:
 
             # ── Global Actions ──
             global_group = QGroupBox("Globale Aktionen")
+            global_vbox = QVBoxLayout()       # two rows: profiles/buttons + auto-mode
+
+            # ── Row 1: Profiles + Action buttons ──
             gl = QHBoxLayout()
 
             self.all_apply = QPushButton("✅ Alle anwenden")
@@ -1343,7 +1353,22 @@ if HAS_QT:
                 save_btn.clicked.connect(self._save_profile)
                 gl.addWidget(save_btn)
 
-            # ── Auto mode + Sensor live display ──
+            self.help_btn = QPushButton("❓ Hilfe")
+            self.help_btn.clicked.connect(self._show_help)
+            gl.addWidget(self.help_btn)
+
+            self.log_btn = QPushButton("📋 Log")
+            self.log_btn.clicked.connect(self._show_log)
+            gl.addWidget(self.log_btn)
+
+            self.diag_btn = QPushButton("🔍 Diagnose")
+            self.diag_btn.clicked.connect(self._show_diagnose)
+            gl.addWidget(self.diag_btn)
+
+            gl.addStretch()
+            global_vbox.addLayout(gl)
+
+            # ── Row 2: Auto mode (own row, no overlap with profiles) ──
             if HAS_FEATURES and self.auto_mode and self.auto_mode.available_sensors:
                 auto_group = QGroupBox("🌡 Auto-Modus")
                 auto_layout = QVBoxLayout()
@@ -1366,12 +1391,14 @@ if HAS_QT:
 
                 # Current temperature display
                 self.auto_temp_label = QLabel("—°C")
-                self.auto_temp_label.setStyleSheet("color: #e74c3c; font-weight: bold; font-size: 14px; min-width: 50px;")
+                self.auto_temp_label.setStyleSheet(
+                    "color: #e74c3c; font-weight: bold; font-size: 14px; min-width: 50px;")
                 ctrl_row.addWidget(self.auto_temp_label)
 
                 # Current auto fan speed display
                 self.auto_fan_label = QLabel("Fan: —%")
-                self.auto_fan_label.setStyleSheet("color: #3498db; font-weight: bold; font-size: 14px; min-width: 50px;")
+                self.auto_fan_label.setStyleSheet(
+                    "color: #3498db; font-weight: bold; font-size: 14px; min-width: 50px;")
                 ctrl_row.addWidget(self.auto_fan_label)
 
                 ctrl_row.addStretch()
@@ -1385,7 +1412,7 @@ if HAS_QT:
 
                 auto_group.setLayout(auto_layout)
                 auto_group.setMaximumHeight(85)
-                gl.addWidget(auto_group)
+                global_vbox.addWidget(auto_group)
 
                 # Sensor live update timer (every 2s)
                 self._sensor_timer = QTimer(self)
@@ -1393,20 +1420,7 @@ if HAS_QT:
                 self._sensor_timer.start(2000)
                 self._update_sensor_display()
 
-            self.help_btn = QPushButton("❓ Hilfe")
-            self.help_btn.clicked.connect(self._show_help)
-            gl.addWidget(self.help_btn)
-
-            self.log_btn = QPushButton("📋 Log")
-            self.log_btn.clicked.connect(self._show_log)
-            gl.addWidget(self.log_btn)
-
-            self.diag_btn = QPushButton("🔍 Diagnose")
-            self.diag_btn.clicked.connect(self._show_diagnose)
-            gl.addWidget(self.diag_btn)
-
-            gl.addStretch()
-            global_group.setLayout(gl)
+            global_group.setLayout(global_vbox)
             main_layout.addWidget(global_group)
 
             # ── Auto-mode & History timer ──
@@ -1419,6 +1433,21 @@ if HAS_QT:
                 self._history_timer = QTimer(self)
                 self._history_timer.timeout.connect(self._history_tick)
                 self._history_timer.start(3000)  # 3s interval
+
+        def _make_tab_label(self, ch: int, desc: str) -> str:
+            """Generate tab label: 'CH 1 — CPU Radiator' or 'CH 1' if no description."""
+            base = f"  CH {ch + 1}  "
+            if desc:
+                # Truncate long descriptions for tab label
+                short = desc[:20] + "…" if len(desc) > 20 else desc
+                return f"  CH {ch + 1} — {short}"
+            return base
+
+        def _update_tab_label(self, ch: int):
+            """Called when channel description changes — update tab text."""
+            if ch < len(self.tab_widgets):
+                desc = self.tab_widgets[ch].get_description()
+                self.tabs.setTabText(ch, self._make_tab_label(ch, desc))
 
         def _apply_all(self):
             """Apply settings for all channels at once."""
@@ -1543,13 +1572,22 @@ if HAS_QT:
                     # Disable manual sliders
                     for w in self.tab_widgets:
                         w.speed_slider.setEnabled(False)
+                    self.statusBar().showMessage(
+                        f"✅ Auto-Modus aktiv — Sensor: {self.auto_mode.current_sensor}", 5000)
                 else:
                     self.auto_cb.setChecked(False)
+                    QMessageBox.warning(self, "Auto-Modus",
+                        "Kein Sensor ausgewählt!\n\n"
+                        "Bitte wähle zuerst einen Temperatursensor aus der Liste.")
             else:
                 self.auto_mode.stop()
                 self._auto_timer.stop()
                 for w in self.tab_widgets:
                     w.speed_slider.setEnabled(True)
+                # Reset labels
+                self.auto_temp_label.setText("—°C")
+                self.auto_fan_label.setText("Fan: —%")
+                self.statusBar().showMessage("Auto-Modus deaktiviert", 3000)
 
         def _change_auto_sensor(self, sensor_name):
             if self.auto_mode:
